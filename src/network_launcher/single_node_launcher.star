@@ -72,20 +72,26 @@ def launch_single_node(plan, chain_cfg):
 
     # Phase A: add service with sleep entrypoint
     base_service = plan.add_service(
-        name=node_name,
+        name="base-service",
         config=ServiceConfig(
             image=forking_image,
             ports=ports,
             entrypoint=["/bin/sh", "-lc", "sleep infinity"],
             min_cpu=participant.get("min_cpu", 500),
             min_memory=participant.get("min_memory", 512),
-            files={"/merge_patch": merge_artifact},
+            files={
+                "/merge_patch": merge_artifact,
+                "/tmp/execution-data": Directory(
+                    persistent_key="node-data",
+                    size=5000
+                )
+            },
         ),
     )
 
     # a) Generate validator key
     res = plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[ "/bin/sh","-lc", "{} keys add validator --keyring-backend test --output json".format(binary) ],
             extract={"validator_addr": "fromjson | .address", "validator_mnemonic": "fromjson | .mnemonic"},
@@ -97,12 +103,12 @@ def launch_single_node(plan, chain_cfg):
 
     # b) Init node
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
                 "-lc",
-                "printf '%s' '{}' | {} init thorchain-node --recover --chain-id {}".format(
+                "printf '%s' '{}' | {} init base-service --recover --chain-id {}".format(
                     validator_mnemonic, binary, chain_id
                 ),
             ],
@@ -112,7 +118,7 @@ def launch_single_node(plan, chain_cfg):
 
     # c) Stage forked genesis (single copy)
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(command=["/bin/sh", "-lc", "cp /tmp/genesis.json {}/genesis.json".format(config_folder)]),
         description="Copy forked genesis into config",
     )
@@ -120,7 +126,7 @@ def launch_single_node(plan, chain_cfg):
 
     # d) Get SECP bech32 pk
     secp_res = plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -134,13 +140,13 @@ def launch_single_node(plan, chain_cfg):
 
     # e) Get validator consensus pubkeys (ed + cons)
     ed_res = plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(command=["/bin/sh", "-lc", "{0} tendermint show-validator | {0} pubkey | tr -d '\\n'".format(binary)]),
         description="Derive validator ed25519 bech32 pubkey",
     )
     ed_pk = ed_res["output"]
     cons_res = plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=["/bin/sh", "-lc", "{0} tendermint show-validator | {0} pubkey --bech cons | tr -d '\\n'".format(binary)]
         ),
@@ -150,7 +156,7 @@ def launch_single_node(plan, chain_cfg):
 
     # f) Create faucet key
     f_res = plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=["/bin/sh", "-lc", "{} keys add faucet --keyring-backend test --output json".format(binary)],
             extract={"faucet_addr": "fromjson | .address", "faucet_mnemonic": "fromjson | .mnemonic"},
@@ -160,12 +166,12 @@ def launch_single_node(plan, chain_cfg):
     faucet_addr = f_res["extract.faucet_addr"].replace("\n", "")
     faucet_mnemonic = f_res["extract.faucet_mnemonic"].replace("\n", "")
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
                 "-lc",
-                "printf '%s' '{}' > /tmp/faucet.mnemonic".format(faucet_mnemonic),
+                "printf '%s' '{}' > /tmp/execution-data/faucet.mnemonic".format(faucet_mnemonic),
             ],
         ),
         description="Persist faucet mnemonic for downstream faucet launcher",
@@ -173,7 +179,7 @@ def launch_single_node(plan, chain_cfg):
 
     # g) Prepare JSON payloads and compute totals (single Python pass)
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -242,7 +248,7 @@ PY
     # Build faucet balances and supply updates for all denoms at requested height
     # Validate requested fork height and fetch cumulative KV diffs if needed
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -255,7 +261,7 @@ PY
 
     # e.1) Apply cumulative KV diffs using uploaded merge_patch.py (mounted via ServiceConfig.files)
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -267,7 +273,7 @@ PY
     )
     # e.2) Minimal observability for fetch/merge
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -279,7 +285,7 @@ PY
     )
     # e.3) Scan thorchain for stringified JSON to catch bad fields early
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -295,7 +301,7 @@ PY
 
     faucet_height = str(chain_cfg.get("forking", {}).get("height", 23010004))
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -365,7 +371,7 @@ PY
 
     # h) Single-pass placeholder replacements in genesis via sed
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -516,7 +522,7 @@ PY
 
     # j) Batch config updates
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
@@ -553,19 +559,55 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         description="Apply node configuration (API/RPC/gRPC/Prometheus/P2P)",
     )
 
-    # Final: start thornode in background so plan continues
+    # # Copy thornode folder to persistent volume
     plan.exec(
-        node_name,
+        "base-service",
         ExecRecipe(
             command=[
                 "/bin/sh",
-                "-lc",
-                "nohup sh -c \"printf 'validator\\nTestPassword!\\n' | {bin} start\" >/var/log/thornode.out 2>&1 & echo $! >/tmp/thornode.pid; sleep 1".format(
-                    bin=binary
-                ),
-            ],
-        ),
-        description="Start thornode in background",
+                "-c",
+                "mv /root/.thornode /tmp/execution-data/"
+            ]
+        )
     )
+
+    plan.remove_service(
+        "base-service",
+        description = "removing base service"
+    )
+
+    node_service = plan.add_service(
+        name=node_name,
+        config=ServiceConfig(
+            image=forking_image,
+            ports=ports,
+            entrypoint=["/bin/sh", "-c", "mv /tmp/execution-data/.thornode /root/ && printf 'validator\nTestPassword!\\n' | {bin} start".format(bin=binary)],
+            min_cpu=participant.get("min_cpu", 500),
+            min_memory=participant.get("min_memory", 512),
+            files={
+                "/tmp/execution-data": Directory(
+                    persistent_key="node-data",
+                    size=5000
+                )
+            },
+        ),
+    )
+
+
+
+    # Final: start thornode in background so plan continues
+    # plan.exec(
+    #     node_name,
+    #     ExecRecipe(
+    #         command=[
+    #             "/bin/sh",
+    #             "-lc",
+    #             "nohup sh -c \"printf 'validator\\nTestPassword!\\n' | {bin} start\" >/var/log/thornode.out 2>&1 & echo $! >/tmp/thornode.pid; sleep 1".format(
+    #                 bin=binary
+    #             ),
+    #         ],
+    #     ),
+    #     description="Start thornode in background",
+    # )
 
     return {"name": node_name, "ip": base_service.ip_address}
