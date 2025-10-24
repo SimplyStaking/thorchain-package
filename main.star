@@ -67,7 +67,7 @@ def run(plan, args):
                     faucet_mnemonic_res = plan.exec(
                         service_name=node_name,
                         recipe=ExecRecipe(
-                            command=["/bin/sh","-lc","cat /tmp/faucet.mnemonic | tr -d '\\r'"],
+                            command=["/bin/sh","-lc","cat /tmp/execution-data/faucet.mnemonic | tr -d '\\r'"],
                             extract={"mnemonic":"."},
                         ),
                         description="Read faucet mnemonic from node",
