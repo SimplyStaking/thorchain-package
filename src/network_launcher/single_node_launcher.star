@@ -581,7 +581,7 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         config=ServiceConfig(
             image=forking_image,
             ports=ports,
-            entrypoint=["/bin/sh", "-c", "mv /tmp/execution-data/.thornode /root/ && printf 'validator\nTestPassword!\\n' | {bin} start".format(bin=binary)],
+            entrypoint=["/bin/sh", "-c", "mv /tmp/execution-data/.thornode /root/ || true && printf 'validator\nTestPassword!\\n' | {bin} start".format(bin=binary)],
             min_cpu=participant.get("min_cpu", 500),
             min_memory=participant.get("min_memory", 512),
             files={
