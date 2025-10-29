@@ -79,5 +79,25 @@
     "values": {
       "WASMPERMISSIONLESS": 1
     }
+  },
+  "cli_defaults": {
+    "image": "tiljordan/thornode-forking:1.0.17",
+    "persistent_size": 2048,
+    "min_cpu": 250,
+    "min_memory": 256
+  },
+  "cli_profiles": {
+    "mainnet": {
+      "chain_id": "thorchain-mainnet-v1",
+      "rpc_url": "https://thornode.ninerealms.com:443",
+      "api_url": "https://thornode.ninerealms.com",
+      "faucet_url": ""
+    },
+    "octhornet": {
+      "chain_id": "thorchain",
+      "rpc_url": "https://498b94b71243407c8d989fb8999f26e8-rpc.edge-1.bloctopus.io",
+      "api_url": "https://498b94b71243407c8d989fb8999f26e8-api.edge-1.bloctopus.io",
+      "faucet_url": ""
+    }
   }
 }
