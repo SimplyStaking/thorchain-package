@@ -95,9 +95,9 @@
     },
     "octhornet": {
       "chain_id": "thorchain",
-      "rpc_url": "https://d028408a1f2746f38b98633446588992-rpc.edge-1.bloctopus.io",
-      "api_url": "https://d028408a1f2746f38b98633446588992-api.edge-1.bloctopus.io",
-      "faucet_url": "https://d028408a1f2746f38b98633446588992-faucet.edge-1.bloctopus.io"
+      "rpc_url": "https://58365f129de54b538afb5af5d465f308-rpc.edge-1.bloctopus.io",
+      "api_url": "https://58365f129de54b538afb5af5d465f308-api.edge-1.bloctopus.io",
+      "faucet_url": "https://58365f129de54b538afb5af5d465f308-faucet.edge-1.bloctopus.io"
     }
   }
 }
