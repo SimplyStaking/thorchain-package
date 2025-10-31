@@ -1468,8 +1468,8 @@ None (backwards compatible via legacy field sync)
 |       | - Implement migration logic | 0.5 day | |
 |       | - Add unit tests | 0.5 day | |
 | **2** | **Cache helpers & network tool** | **1 day** | Phase 1 |
-|       | - Network state getters/setters | 0.5 day | |
-|       | - Update thor_networks_context | 0.5 day | |
+|       | - Network state getters/setters ✅ (`internal/cache/networks.go`, unit tests) | 0.5 day | |
+|       | - Update thor_networks_context ✅ (`internal/impl/thor_networks_context_impl.go` exposes per-network defaults) | 0.5 day | |
 | **3** | **Script updates** | **1-1.5 days** | Phase 2 |
 |       | - Update Python cache reader/writer | 0.75 day | |
 |       | - Update shell auto-config logic | 0.5 day | |
