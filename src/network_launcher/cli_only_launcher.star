@@ -58,7 +58,7 @@ def launch_cli_only(plan, chain_cfg):
     )
 
     ensure_default_key = """
-set -euo pipefail
+set -eu
 thornode keys show default --keyring-backend test --output json >/tmp/default-key.json 2>/dev/null || \
 thornode keys add default --keyring-backend test --output json >/tmp/default-key.json
 """
