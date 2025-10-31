@@ -57,26 +57,58 @@ def launch_cli_only(plan, chain_cfg):
         description="Initialize thornode home for CLI operations",
     )
 
-    metadata_script = """python3 - <<'PY'
+    ensure_default_key = """
+set -euo pipefail
+thornode keys show default --keyring-backend test --output json >/tmp/default-key.json 2>/dev/null || \
+thornode keys add default --keyring-backend test --output json >/tmp/default-key.json
+"""
+
+    plan.exec(
+        service_name,
+        ExecRecipe(
+            command=["/bin/sh", "-lc", ensure_default_key],
+        ),
+        description="Ensure default CLI key exists",
+    )
+
+    metadata_script = """
+python3 - <<'PY'
 import json
+import subprocess
 from pathlib import Path
 
+def read_key():
+    try:
+        proc = subprocess.run(
+            ["thornode", "keys", "show", "default", "--keyring-backend", "test", "--output", "json"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        return {}
+    try:
+        return json.loads(proc.stdout or "{}")
+    except Exception:
+        return {}
+
 data = {
-    "profile": %r,
-    "chain_id": %r,
-    "rpc_url": %r,
-    "api_url": %r,
-    "faucet_url": %r,
+    "profile": %(profile)r,
+    "chain_id": %(chain_id)r,
+    "rpc_url": %(rpc)r,
+    "api_url": %(api)r,
+    "faucet_url": %(faucet)r,
+    "default_key": read_key(),
 }
-path = Path("/root/.thornode/cli_context.json")
-path.write_text(json.dumps(data, indent=2))
-PY""" % (
-        chain_cfg.get("profile", network_name),
-        chain_cfg.get("chain_id", ""),
-        chain_cfg.get("rpc_url", ""),
-        chain_cfg.get("api_url", ""),
-        chain_cfg.get("faucet_url", ""),
-    )
+Path("/root/.thornode/cli_context.json").write_text(json.dumps(data, indent=2))
+PY
+""" % {
+        "profile": chain_cfg.get("profile", network_name),
+        "chain_id": chain_cfg.get("chain_id", ""),
+        "rpc": chain_cfg.get("rpc_url", ""),
+        "api": chain_cfg.get("api_url", ""),
+        "faucet": chain_cfg.get("faucet_url", ""),
+    }
 
     plan.exec(
         service_name,
