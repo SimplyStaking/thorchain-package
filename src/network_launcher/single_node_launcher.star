@@ -11,6 +11,7 @@ def launch_single_node(plan, chain_cfg):
     account_balance = int(participant["account_balance"])
     bond_amount = int(participant.get("bond_amount", "500000000000"))
     faucet_amount = int(chain_cfg["faucet"]["faucet_amount"])
+    gomemlimit = participant.get("gomemlimit", "6GiB")
 
     app_version = chain_cfg["app_version"]
     req_height = int(forking_config.get("height", 0))
@@ -78,7 +79,7 @@ def launch_single_node(plan, chain_cfg):
             ports=ports,
             entrypoint=["/bin/sh", "-lc", "sleep infinity"],
             min_cpu=participant.get("min_cpu", 500),
-            min_memory=participant.get("min_memory", 512),
+            min_memory=participant.get("min_memory", 1024),
             files={
                 "/merge_patch": merge_artifact,
                 "/tmp/execution-data": Directory(
@@ -534,6 +535,12 @@ CFG=%(cfg)s/config.toml
 sed -i 's/^minimum-gas-prices = ".*"/minimum-gas-prices = "0rune"/' "$APP"
 sed -i 's/^enable = false/enable = true/' "$APP"
 sed -i 's/^swagger = false/swagger = true/' "$APP"
+sed -i 's/^pruning = "default"/pruning = "custom"/' "$APP"
+sed -i 's/^pruning-keep-recent = "0"/pruning-keep-recent = "200"/' "$APP"
+sed -i 's/^pruning-keep-every = "0"/pruning-keep-every = "0"/' "$APP"
+sed -i 's/^pruning-interval = "0"/pruning-interval = "20"/' "$APP"
+sed -i 's/^snapshot-interval = [0-9][0-9]*/snapshot-interval = 0/' "$APP"
+sed -i 's/^iavl-cache-size = [0-9][0-9]*/iavl-cache-size = 131072/' "$APP"
 
 sed -i 's/^timeout_commit = "5s"/timeout_commit = "1s"/' "$CFG"
 sed -i 's/^timeout_propose = "3s"/timeout_propose = "1s"/' "$CFG"
@@ -566,7 +573,7 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
             command=[
                 "/bin/sh",
                 "-c",
-                "mv /root/.thornode /tmp/execution-data/"
+                "set -e; rm -rf /tmp/execution-data/.thornode; cp -a /root/.thornode /tmp/execution-data/.thornode"
             ]
         )
     )
@@ -581,9 +588,16 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         config=ServiceConfig(
             image=forking_image,
             ports=ports,
-            entrypoint=["/bin/sh", "-c", "mv /tmp/execution-data/.thornode /root/ || true && printf 'validator\nTestPassword!\\n' | {bin} start".format(bin=binary)],
+            entrypoint=[
+                "/bin/sh",
+                "-lc",
+                "set -e; THOR_HOME=/tmp/execution-data/.thornode; if [ ! -d \"$THOR_HOME\" ]; then echo 'missing thornode home in persistent volume' >&2; exit 1; fi; ln -sfn \"$THOR_HOME\" /root/.thornode; export GOMEMLIMIT='{gomemlimit}'; printf 'validator\\nTestPassword!\\n' | {bin} start --home \"$THOR_HOME\"".format(
+                    bin=binary,
+                    gomemlimit=gomemlimit,
+                )
+            ],
             min_cpu=participant.get("min_cpu", 500),
-            min_memory=participant.get("min_memory", 512),
+            min_memory=participant.get("min_memory", 1024),
             files={
                 "/tmp/execution-data": Directory(
                     persistent_key="node-data",

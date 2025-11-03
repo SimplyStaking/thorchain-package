@@ -87,7 +87,8 @@ participants:
     bond_amount: "300000000000000"
     count: 1
     min_cpu: 500
-    min_memory: 512
+    min_memory: 1024
+    gomemlimit: 6GiB
 ```
 
 ### Available Services
