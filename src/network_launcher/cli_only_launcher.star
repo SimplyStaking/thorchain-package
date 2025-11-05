@@ -18,6 +18,8 @@ def _build_env(chain_cfg):
     return env_vars
 
 
+toolchain = import_module("./toolchain.star")
+
 def launch_cli_only(plan, chain_cfg):
     network_name = chain_cfg.get("name", "thorchain-cli")
     service_name = chain_cfg.get("service_name", "{}-cli".format(network_name))
@@ -117,6 +119,8 @@ PY
         ),
         description="Write CLI context metadata",
     )
+
+    toolchain.run_toolchain_setup(plan, service_name)
 
     return {
         "name": service_name,

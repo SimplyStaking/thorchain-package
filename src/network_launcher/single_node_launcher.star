@@ -1,3 +1,5 @@
+toolchain = import_module("./toolchain.star")
+
 def launch_single_node(plan, chain_cfg):
     chain_name = chain_cfg["name"]
     chain_id = chain_cfg["chain_id"]
@@ -566,6 +568,8 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         description="Apply node configuration (API/RPC/gRPC/Prometheus/P2P)",
     )
 
+    toolchain.run_toolchain_setup(plan, "base-service")
+
     # # Copy thornode folder to persistent volume
     plan.exec(
         "base-service",
@@ -606,6 +610,8 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
             },
         ),
     )
+
+    toolchain.run_toolchain_setup(plan, node_name)
 
 
 
