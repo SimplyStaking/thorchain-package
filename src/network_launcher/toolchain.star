@@ -1,63 +1,31 @@
 def run_toolchain_setup(plan, service_name):
-    """Ensure Rust 1.77.x toolchain and wasm utilities are installed inside the service."""
-    setup_script = r"""
-set -euxo pipefail
+    verify_script = r"""
+set -euo pipefail
 
-APT_UPDATED=0
-
-ensure_pkg() {
-  pkg="$1"
-  if ! dpkg -s "$pkg" >/dev/null 2>&1; then
-    if [ "${APT_UPDATED:-0}" -eq 0 ]; then
-      apt-get update
-      APT_UPDATED=1
-    fi
-    DEBIAN_FRONTEND=noninteractive apt-get install -y "$pkg"
+missing=""
+for bin in rustup cargo wasm-tools wasm-opt; do
+  if ! command -v "$bin" >/dev/null 2>&1; then
+    missing="$missing $bin"
   fi
-}
+done
 
-ensure_base_packages() {
-  ensure_pkg curl
-  ensure_pkg build-essential
-  ensure_pkg pkg-config
-  ensure_pkg libssl-dev
-  ensure_pkg bash
-}
+if [ -n "${missing}" ]; then
+  echo "Missing required toolchain components:${missing}" >&2
+  exit 1
+fi
 
-ensure_binaryen() {
-  if ! command -v wasm-opt >/dev/null 2>&1; then
-    ensure_pkg binaryen
-  fi
-}
+if ! rustup toolchain list | grep -q "1\.77\.1"; then
+  echo "Rust toolchain 1.77.1 not installed (rustup toolchain list)" >&2
+  exit 1
+fi
 
-ensure_rustup() {
-  if ! command -v rustup >/dev/null 2>&1; then
-    curl --retry 5 --retry-connrefused --retry-delay 2 https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal
-  fi
-  source "$HOME/.cargo/env"
-  if ! rustup toolchain list | grep -q "1\.77\.1"; then
-    rustup toolchain install 1.77.1
-  fi
-  export RUSTUP_TOOLCHAIN=1.77.1
-}
-
-ensure_wasm_tools() {
-  source "$HOME/.cargo/env"
-  if ! command -v wasm-tools >/dev/null 2>&1; then
-    cargo +1.77.1 install wasm-tools --locked
-  fi
-}
-
-ensure_base_packages
-ensure_rustup
-ensure_binaryen
-ensure_wasm_tools
+echo "✓ Rust 1.77.1 toolchain and wasm utilities detected"
 """
 
     plan.exec(
         service_name,
         ExecRecipe(
-            command=["/bin/bash", "-lc", setup_script],
+            command=["/bin/bash", "-lc", verify_script],
         ),
-        description="Install Rust 1.77.1 toolchain and wasm tooling",
+        description="Verify Rust 1.77.1 toolchain and wasm tooling",
     )
