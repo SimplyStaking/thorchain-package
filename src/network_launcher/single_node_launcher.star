@@ -610,45 +610,47 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         ),
     )
 
-    # Provision companion CLI utility container (shares network with thornode)
+    # Provision companion CLI utility container (optional, disabled by default for cloud efficiency)
     cli_cfg = chain_cfg.get("cli_service", {})
-    cli_name = cli_cfg.get("name", "{}-cli".format(chain_name))
-    cli_payload = {
-        "name": cli_name,
-        "type": "thorchain",
-        "config_type": "cli_only",
-        "profile": chain_name,
-        "service_name": cli_name,
-        "node_service": node_name,
-        "chain_id": chain_id,
-        "rpc_url": "http://{}:26657".format(node_name),
-        "api_url": "http://{}:1317".format(node_name),
-        "faucet_url": chain_cfg.get("faucet", {}).get("endpoint", ""),
-        "cli_image": cli_cfg.get("image", "fravlaca/thor-cli-toolchain:0.1.0"),
-        "persistent_key": cli_cfg.get("persistent_key", "cli-{}-thornode-home".format(chain_name)),
-        "persistent_size": cli_cfg.get("persistent_size", 2048),
-        "min_cpu": cli_cfg.get("min_cpu", 250),
-        "min_memory": cli_cfg.get("min_memory", 256),
-        "skip_toolchain_setup": cli_cfg.get("skip_toolchain_setup", False),
-    }
-    cli_only_launcher.launch_cli_only(plan, cli_payload)
+    cli_name = None
+    if chain_cfg.get("deploy_cli", False):
+        cli_name = cli_cfg.get("name", "{}-cli".format(chain_name))
+        cli_payload = {
+            "name": cli_name,
+            "type": "thorchain",
+            "config_type": "cli_only",
+            "profile": chain_name,
+            "service_name": cli_name,
+            "node_service": node_name,
+            "chain_id": chain_id,
+            "rpc_url": "http://{}:26657".format(node_name),
+            "api_url": "http://{}:1317".format(node_name),
+            "faucet_url": chain_cfg.get("faucet", {}).get("endpoint", ""),
+            "cli_image": cli_cfg.get("image", "fravlaca/thor-cli-toolchain:0.1.0"),
+            "persistent_key": cli_cfg.get("persistent_key", "cli-{}-thornode-home".format(chain_name)),
+            "persistent_size": cli_cfg.get("persistent_size", 2048),
+            "min_cpu": cli_cfg.get("min_cpu", 250),
+            "min_memory": cli_cfg.get("min_memory", 256),
+            "skip_toolchain_setup": cli_cfg.get("skip_toolchain_setup", False),
+        }
+        cli_only_launcher.launch_cli_only(plan, cli_payload)
 
-    # Import faucet key into CLI container so it matches thornode defaults
-    faucet_mnemonic_res = plan.exec(
-        node_name,
-        ExecRecipe(
-            command=[
-                "/bin/sh",
-                "-lc",
-                "cat /tmp/execution-data/faucet.mnemonic | tr -d '\\r'",
-            ],
-            extract={"mnemonic": "."},
-        ),
-        description="Read faucet mnemonic for CLI key import",
-    )
-    faucet_mnemonic = faucet_mnemonic_res.get("extract.mnemonic", "").strip()
-    if faucet_mnemonic:
-        import_script = """
+        # Import faucet key into CLI container so it matches thornode defaults
+        faucet_mnemonic_res = plan.exec(
+            node_name,
+            ExecRecipe(
+                command=[
+                    "/bin/sh",
+                    "-lc",
+                    "cat /tmp/execution-data/faucet.mnemonic | tr -d '\\r'",
+                ],
+                extract={"mnemonic": "."},
+            ),
+            description="Read faucet mnemonic for CLI key import",
+        )
+        faucet_mnemonic = faucet_mnemonic_res.get("extract.mnemonic", "").strip()
+        if faucet_mnemonic:
+            import_script = """
 set -euo pipefail
 
 MNEMONIC=$(cat <<'EOF'
@@ -662,15 +664,18 @@ printf '%s' "$MNEMONIC" | thornode keys add faucet --keyring-backend test --reco
 thornode keys delete default --keyring-backend test --yes >/dev/null 2>&1 || true
 printf '%s' "$MNEMONIC" | thornode keys add default --keyring-backend test --recover >/tmp/default-key.json
 """.format(
-            mnemonic=faucet_mnemonic
-        )
-        plan.exec(
-            cli_name,
-            ExecRecipe(
-                command=["/bin/sh", "-lc", import_script],
-            ),
-            description="Import faucet key into CLI toolchain",
-        )
+                mnemonic=faucet_mnemonic
+            )
+            plan.exec(
+                cli_name,
+                ExecRecipe(
+                    command=["/bin/sh", "-lc", import_script],
+                ),
+                description="Import faucet key into CLI toolchain",
+            )
+        plan.print("CLI container '{}' provisioned".format(cli_name))
+    else:
+        plan.print("CLI container skipped (use deploy_cli: true to enable)")
 
     # Final: start thornode in background so plan continues
     # plan.exec(

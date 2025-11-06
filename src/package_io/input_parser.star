@@ -96,6 +96,7 @@ def apply_chain_defaults(chain, defaults):
         "min_memory", cli_defaults.get("min_memory", 128))
     cli_service["skip_toolchain_setup"] = cli_service.get(
         "skip_toolchain_setup", False)
+    chain["deploy_cli"] = chain.get("deploy_cli", defaults.get("deploy_cli", False))
 
     return chain
 
