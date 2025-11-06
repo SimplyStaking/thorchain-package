@@ -24,7 +24,7 @@ def launch_cli_only(plan, chain_cfg):
     network_name = chain_cfg.get("name", "thorchain-cli")
     service_name = chain_cfg.get("service_name", "{}-cli".format(network_name))
     persistent_key = chain_cfg.get("persistent_key", "cli-{}-thornode-home".format(network_name))
-    image = chain_cfg.get("cli_image", "tiljordan/thornode-forking:1.0.17")
+    image = chain_cfg.get("cli_image", "fravlaca/thor-cli-toolchain:0.1.0")
 
     plan.print("Launching THORChain CLI utility container '{}'".format(service_name))
 
@@ -36,7 +36,7 @@ def launch_cli_only(plan, chain_cfg):
             entrypoint=["/bin/sh", "-lc", "sleep infinity"],
             env_vars=_build_env(chain_cfg),
             min_cpu=chain_cfg.get("min_cpu", 250),
-            min_memory=chain_cfg.get("min_memory", 256),
+            min_memory=chain_cfg.get("min_memory", 128),
             files={
                 "/root/.thornode": Directory(
                     persistent_key=persistent_key,
@@ -80,22 +80,29 @@ import subprocess
 from pathlib import Path
 
 def read_key():
-    try:
-        proc = subprocess.run(
-            ["thornode", "keys", "show", "default", "--keyring-backend", "test", "--output", "json"],
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-    except subprocess.CalledProcessError:
-        return {}
-    try:
-        return json.loads(proc.stdout or "{}")
-    except Exception:
-        return {}
+    for name in ("faucet", "default"):
+        try:
+            proc = subprocess.run(
+                ["thornode", "keys", "show", name, "--keyring-backend", "test", "--output", "json"],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError:
+            continue
+        try:
+            data = json.loads(proc.stdout or "{}")
+        except Exception:
+            data = {}
+        if isinstance(data, dict):
+            data["name"] = name
+            return data
+    return {}
 
 data = {
     "profile": %(profile)r,
+    "service_name": %(service_name)r,
+    "node_service": %(node_service)r,
     "chain_id": %(chain_id)r,
     "rpc_url": %(rpc)r,
     "api_url": %(api)r,
@@ -106,6 +113,8 @@ Path("/root/.thornode/cli_context.json").write_text(json.dumps(data, indent=2))
 PY
 """ % {
         "profile": chain_cfg.get("profile", network_name),
+        "service_name": service_name,
+        "node_service": chain_cfg.get("node_service", ""),
         "chain_id": chain_cfg.get("chain_id", ""),
         "rpc": chain_cfg.get("rpc_url", ""),
         "api": chain_cfg.get("api_url", ""),
@@ -120,7 +129,8 @@ PY
         description="Write CLI context metadata",
     )
 
-    toolchain.run_toolchain_setup(plan, service_name)
+    if not chain_cfg.get("skip_toolchain_setup", False):
+        toolchain.run_toolchain_setup(plan, service_name)
 
     return {
         "name": service_name,
@@ -129,4 +139,5 @@ PY
         "rpc_url": chain_cfg.get("rpc_url", ""),
         "api_url": chain_cfg.get("api_url", ""),
         "faucet_url": chain_cfg.get("faucet_url", ""),
+        "node_service": chain_cfg.get("node_service", ""),
     }
