@@ -57,7 +57,7 @@
       "bond_amount": 500000000000,
       "min_cpu": 1000,
       "min_memory": 8192,
-      "gomemlimit": "6.5GiB"
+      "gomemlimit": "7GiB"
     }
   ],
   "additional_services": [
@@ -82,10 +82,10 @@
     }
   },
   "cli_defaults": {
-    "image": "tiljordan/thornode-forking:1.0.17",
+    "image": "fravlaca/thor-cli-toolchain:0.1.0",
     "persistent_size": 2048,
     "min_cpu": 250,
-    "min_memory": 256
+    "min_memory": 128
   },
   "cli_profiles": {
     "mainnet": {

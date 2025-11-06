@@ -77,6 +77,26 @@ def apply_chain_defaults(chain, defaults):
         else:
             chain["mimir"][key] = chain["mimir"].get(key, value)
 
+    # Apply defaults for the companion CLI service consumed by MCP tooling.
+    cli_defaults = defaults.get("cli_defaults", {})
+    chain_name = chain.get("name", defaults.get("name", "thorchain"))
+    chain["cli_service"] = chain.get("cli_service", {})
+    cli_service = chain["cli_service"]
+
+    cli_service["name"] = cli_service.get("name", "{}-cli".format(chain_name))
+    cli_service["image"] = cli_service.get(
+        "image", cli_defaults.get("image", defaults["participants"][0]["image"]))
+    cli_service["persistent_key"] = cli_service.get(
+        "persistent_key", "cli-{}-thornode-home".format(chain_name))
+    cli_service["persistent_size"] = cli_service.get(
+        "persistent_size", cli_defaults.get("persistent_size", 2048))
+    cli_service["min_cpu"] = cli_service.get(
+        "min_cpu", cli_defaults.get("min_cpu", 250))
+    cli_service["min_memory"] = cli_service.get(
+        "min_memory", cli_defaults.get("min_memory", 128))
+    cli_service["skip_toolchain_setup"] = cli_service.get(
+        "skip_toolchain_setup", False)
+
     return chain
 
 def validate_input_args(input_args):
