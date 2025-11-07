@@ -8,6 +8,7 @@
   "chain_contracts": [],
   "genesis_delay": 5,
   "initial_height": 23043759,
+  "deploy_cli": false,
   "denom": {
     "name": "rune",
     "display": "rune",
@@ -55,8 +56,9 @@
       "image": "tiljordan/thornode-forking:1.0.17",
       "account_balance": 1000000000000,
       "bond_amount": 500000000000,
-      "min_cpu": 500,
-      "min_memory": 512
+      "min_cpu": 1000,
+      "min_memory": 8192,
+      "gomemlimit": "7GiB"
     }
   ],
   "additional_services": [
@@ -78,6 +80,26 @@
     "enabled": true,
     "values": {
       "WASMPERMISSIONLESS": 1
+    }
+  },
+  "cli_defaults": {
+    "image": "fravlaca/thor-cli-toolchain:0.1.0",
+    "persistent_size": 2048,
+    "min_cpu": 250,
+    "min_memory": 128
+  },
+  "cli_profiles": {
+    "mainnet": {
+      "chain_id": "thorchain-mainnet-v1",
+      "rpc_url": "https://thornode.ninerealms.com:443",
+      "api_url": "https://thornode.ninerealms.com",
+      "faucet_url": ""
+    },
+    "octhornet": {
+      "chain_id": "thorchain",
+      "rpc_url": "https://58365f129de54b538afb5af5d465f308-rpc.edge-1.bloctopus.io",
+      "api_url": "https://58365f129de54b538afb5af5d465f308-api.edge-1.bloctopus.io",
+      "faucet_url": "https://58365f129de54b538afb5af5d465f308-faucet.edge-1.bloctopus.io"
     }
   }
 }

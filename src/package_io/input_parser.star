@@ -77,6 +77,27 @@ def apply_chain_defaults(chain, defaults):
         else:
             chain["mimir"][key] = chain["mimir"].get(key, value)
 
+    # Apply defaults for the companion CLI service consumed by MCP tooling.
+    cli_defaults = defaults.get("cli_defaults", {})
+    chain_name = chain.get("name", defaults.get("name", "thorchain"))
+    chain["cli_service"] = chain.get("cli_service", {})
+    cli_service = chain["cli_service"]
+
+    cli_service["name"] = cli_service.get("name", "{}-cli".format(chain_name))
+    cli_service["image"] = cli_service.get(
+        "image", cli_defaults.get("image", defaults["participants"][0]["image"]))
+    cli_service["persistent_key"] = cli_service.get(
+        "persistent_key", "cli-{}-thornode-home".format(chain_name))
+    cli_service["persistent_size"] = cli_service.get(
+        "persistent_size", cli_defaults.get("persistent_size", 2048))
+    cli_service["min_cpu"] = cli_service.get(
+        "min_cpu", cli_defaults.get("min_cpu", 250))
+    cli_service["min_memory"] = cli_service.get(
+        "min_memory", cli_defaults.get("min_memory", 128))
+    cli_service["skip_toolchain_setup"] = cli_service.get(
+        "skip_toolchain_setup", False)
+    chain["deploy_cli"] = chain.get("deploy_cli", defaults.get("deploy_cli", False))
+
     return chain
 
 def validate_input_args(input_args):
@@ -95,6 +116,8 @@ def validate_input_args(input_args):
 
 def input_parser(input_args=None):
     thorchain_defaults = read_json_file(DEFAULT_THORCHAIN_FILE)
+    cli_defaults = thorchain_defaults.get("cli_defaults", {})
+    cli_profiles = thorchain_defaults.get("cli_profiles", {})
 
     result = {"chains": []}
 
@@ -112,6 +135,31 @@ def input_parser(input_args=None):
                 defaults = thorchain_defaults
             else:
                 fail("Unsupported chain type: " + chain_type)
+
+            config_type = chain.get("config_type", "network")
+            if config_type == "cli_only":
+                profile_name = chain.get("profile", chain.get("name", "thorchain"))
+                profile_defaults = cli_profiles.get(profile_name, {})
+
+                cli_chain = {
+                    "name": chain.get("name", profile_name),
+                    "type": "thorchain",
+                    "config_type": "cli_only",
+                    "profile": profile_name,
+                    "service_name": chain.get("service_name", "{}-cli".format(chain.get("name", profile_name))),
+                    "chain_id": chain.get("chain_id", profile_defaults.get("chain_id", defaults.get("chain_id", "thorchain"))),
+                    "rpc_url": chain.get("rpc_url", profile_defaults.get("rpc_url", "")),
+                    "api_url": chain.get("api_url", profile_defaults.get("api_url", "")),
+                    "faucet_url": chain.get("faucet_url", profile_defaults.get("faucet_url", "")),
+                    "cli_image": chain.get("cli_image", chain.get("image", cli_defaults.get("image", defaults["participants"][0]["image"]))),
+                    "persistent_key": chain.get("persistent_key", "cli-{}-thornode-home".format(profile_name)),
+                    "min_cpu": chain.get("min_cpu", cli_defaults.get("min_cpu", 250)),
+                    "min_memory": chain.get("min_memory", cli_defaults.get("min_memory", 256)),
+                    "persistent_size": chain.get("persistent_size", cli_defaults.get("persistent_size", 2048)),
+                }
+
+                result["chains"].append(cli_chain)
+                continue
 
             # Apply defaults to chain
             chain_config = apply_chain_defaults(chain, defaults)

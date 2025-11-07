@@ -77,7 +77,7 @@ def start_network(plan, chain, binary, chain_id, config_folder, thornode_args, g
 def start_node(plan, node_name, participant, binary, chain_id, thornode_args, config_folder, genesis_file, mnemonic, is_first_node, first_node_id, first_node_ip):
     image = participant["image"]
     min_cpu = participant.get("min_cpu", 500)
-    min_memory = participant.get("min_memory", 512)
+    min_memory = participant.get("min_memory", 1024)
     
     # Configure seed options - critical seed topology implementation
     seed_options = ""
@@ -95,6 +95,7 @@ def start_node(plan, node_name, participant, binary, chain_id, thornode_args, co
         "ThorNodeArgs": thornode_args,
         "SeedOptions": seed_options,
         "Mnemonic": mnemonic,
+        "GoMemLimit": participant.get("gomemlimit", "6GiB"),
     }
     
     # Render start script template

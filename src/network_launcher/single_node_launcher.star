@@ -1,3 +1,6 @@
+toolchain = import_module("./toolchain.star")
+cli_only_launcher = import_module("./cli_only_launcher.star")
+
 def launch_single_node(plan, chain_cfg):
     chain_name = chain_cfg["name"]
     chain_id = chain_cfg["chain_id"]
@@ -11,6 +14,7 @@ def launch_single_node(plan, chain_cfg):
     account_balance = int(participant["account_balance"])
     bond_amount = int(participant.get("bond_amount", "500000000000"))
     faucet_amount = int(chain_cfg["faucet"]["faucet_amount"])
+    gomemlimit = participant.get("gomemlimit", "6GiB")
 
     app_version = chain_cfg["app_version"]
     req_height = int(forking_config.get("height", 0))
@@ -78,7 +82,7 @@ def launch_single_node(plan, chain_cfg):
             ports=ports,
             entrypoint=["/bin/sh", "-lc", "sleep infinity"],
             min_cpu=participant.get("min_cpu", 500),
-            min_memory=participant.get("min_memory", 512),
+            min_memory=participant.get("min_memory", 1024),
             files={
                 "/merge_patch": merge_artifact,
                 "/tmp/execution-data": Directory(
@@ -534,6 +538,12 @@ CFG=%(cfg)s/config.toml
 sed -i 's/^minimum-gas-prices = ".*"/minimum-gas-prices = "0rune"/' "$APP"
 sed -i 's/^enable = false/enable = true/' "$APP"
 sed -i 's/^swagger = false/swagger = true/' "$APP"
+sed -i 's/^pruning = "default"/pruning = "custom"/' "$APP"
+sed -i 's/^pruning-keep-recent = "0"/pruning-keep-recent = "200"/' "$APP"
+sed -i 's/^pruning-keep-every = "0"/pruning-keep-every = "0"/' "$APP"
+sed -i 's/^pruning-interval = "0"/pruning-interval = "20"/' "$APP"
+sed -i 's/^snapshot-interval = [0-9][0-9]*/snapshot-interval = 0/' "$APP"
+sed -i 's/^iavl-cache-size = [0-9][0-9]*/iavl-cache-size = 131072/' "$APP"
 
 sed -i 's/^timeout_commit = "5s"/timeout_commit = "1s"/' "$CFG"
 sed -i 's/^timeout_propose = "3s"/timeout_propose = "1s"/' "$CFG"
@@ -566,7 +576,7 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
             command=[
                 "/bin/sh",
                 "-c",
-                "mv /root/.thornode /tmp/execution-data/"
+                "set -e; rm -rf /tmp/execution-data/.thornode; cp -a /root/.thornode /tmp/execution-data/.thornode"
             ]
         )
     )
@@ -581,9 +591,16 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         config=ServiceConfig(
             image=forking_image,
             ports=ports,
-            entrypoint=["/bin/sh", "-c", "mv /tmp/execution-data/.thornode /root/ || true && printf 'validator\nTestPassword!\\n' | {bin} start".format(bin=binary)],
+            entrypoint=[
+                "/bin/sh",
+                "-lc",
+                "set -e; THOR_HOME=/tmp/execution-data/.thornode; if [ ! -d \"$THOR_HOME\" ]; then echo 'missing thornode home in persistent volume' >&2; exit 1; fi; ln -sfn \"$THOR_HOME\" /root/.thornode; export GOMEMLIMIT='{gomemlimit}'; printf 'validator\\nTestPassword!\\n' | {bin} start --home \"$THOR_HOME\"".format(
+                    bin=binary,
+                    gomemlimit=gomemlimit,
+                )
+            ],
             min_cpu=participant.get("min_cpu", 500),
-            min_memory=participant.get("min_memory", 512),
+            min_memory=participant.get("min_memory", 1024),
             files={
                 "/tmp/execution-data": Directory(
                     persistent_key="node-data",
@@ -593,7 +610,89 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         ),
     )
 
+    # Provision companion CLI utility container (optional, disabled by default for cloud efficiency)
+    cli_cfg = chain_cfg.get("cli_service", {})
+    cli_name = None
+    if chain_cfg.get("deploy_cli", False):
+        cli_name = cli_cfg.get("name", "{}-cli".format(chain_name))
+        cli_payload = {
+            "name": cli_name,
+            "type": "thorchain",
+            "config_type": "cli_only",
+            "profile": chain_name,
+            "service_name": cli_name,
+            "node_service": node_name,
+            "chain_id": chain_id,
+            "rpc_url": "http://{}:26657".format(node_name),
+            "api_url": "http://{}:1317".format(node_name),
+            "faucet_url": chain_cfg.get("faucet", {}).get("endpoint", ""),
+            "cli_image": cli_cfg.get("image", "fravlaca/thor-cli-toolchain:0.1.0"),
+            "persistent_key": cli_cfg.get("persistent_key", "cli-{}-thornode-home".format(chain_name)),
+            "persistent_size": cli_cfg.get("persistent_size", 2048),
+            "min_cpu": cli_cfg.get("min_cpu", 250),
+            "min_memory": cli_cfg.get("min_memory", 256),
+            "skip_toolchain_setup": cli_cfg.get("skip_toolchain_setup", False),
+        }
+        cli_only_launcher.launch_cli_only(plan, cli_payload)
 
+        # Import faucet key into CLI container so it matches thornode defaults
+        faucet_mnemonic_res = plan.exec(
+            node_name,
+            ExecRecipe(
+                command=[
+                    "/bin/sh",
+                    "-lc",
+                    "cat /tmp/execution-data/faucet.mnemonic | tr -d '\\r'",
+                ],
+                extract={"mnemonic": "."},
+            ),
+            description="Read faucet mnemonic for CLI key import",
+        )
+        faucet_mnemonic = faucet_mnemonic_res.get("extract.mnemonic", "").strip()
+        if faucet_mnemonic:
+            import_script = """
+set -eu
+
+MNEMONIC=$(cat <<'EOF'
+{mnemonic}
+EOF
+)
+
+ensure_faucet() {{
+  if thornode keys show faucet --keyring-backend test >/dev/null 2>&1; then
+    echo "[auto-config] key 'faucet' already present, skipping import"
+    return
+  fi
+  printf '%s' "$MNEMONIC" | thornode keys add faucet --keyring-backend test --recover >/tmp/faucet-key.json
+}}
+
+ensure_default() {{
+  if thornode keys show default --keyring-backend test >/dev/null 2>&1; then
+    echo "[auto-config] key 'default' already present, leaving as-is"
+    return
+  fi
+  thornode keys add default --keyring-backend test >/tmp/default-key.json <<'EOF'
+
+EOF
+}}
+
+thornode keys delete faucet --keyring-backend test --yes >/dev/null 2>&1 || true
+ensure_faucet
+
+ensure_default
+""".format(
+                mnemonic=faucet_mnemonic
+            )
+            plan.exec(
+                cli_name,
+                ExecRecipe(
+                    command=["/bin/sh", "-lc", import_script],
+                ),
+                description="Import faucet key into CLI toolchain",
+            )
+        plan.print("CLI container '{}' provisioned".format(cli_name))
+    else:
+        plan.print("CLI container skipped (use deploy_cli: true to enable)")
 
     # Final: start thornode in background so plan continues
     # plan.exec(
@@ -610,4 +709,8 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
     #     description="Start thornode in background",
     # )
 
-    return {"name": node_name, "ip": base_service.ip_address}
+    return {
+        "name": node_name,
+        "ip": base_service.ip_address,
+        "cli_service": cli_name,
+    }

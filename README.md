@@ -87,8 +87,40 @@ participants:
     bond_amount: "300000000000000"
     count: 1
     min_cpu: 500
-    min_memory: 512
+    min_memory: 1024
+    gomemlimit: 6GiB
 ```
+
+### CLI Container Configuration
+
+The package can optionally deploy a CLI toolchain container for local development workflows. **By default, the CLI container is disabled** for cloud efficiency (network + faucet only).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `deploy_cli` | boolean | `false` | Deploy CLI toolchain container with Rust 1.77, wasm-tools, CosmWasm build support |
+
+**Enable CLI container for local development:**
+
+```yaml
+chains:
+  - name: thorchain
+    deploy_cli: true  # Enables CLI container with pre-configured faucet key
+```
+
+**Cloud deployment (default - minimal resources):**
+
+```yaml
+chains:
+  - name: thorchain
+  # deploy_cli: false (default - no CLI container, saves ~250MB RAM + 250m CPU)
+```
+
+**CLI container features:**
+- Rust 1.77.1 toolchain for CosmWasm contract compilation
+- wasm-tools and wasm-opt for WASM optimization
+- Pre-configured keyring with imported faucet account
+- Direct network access to thornode RPC (port 26657) and API (port 1317)
+- Persistent storage for build artifacts and contract deployments
 
 ### Available Services
 

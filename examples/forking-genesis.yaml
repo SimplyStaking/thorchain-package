@@ -17,7 +17,8 @@ chains:
         account_balance: 1000000000000
         bond_amount: 500000000000
         min_cpu: 500
-        min_memory: 512
+        min_memory: 1024
+        gomemlimit: 6GiB
 
     faucet:
       faucet_amount: 1000000000000000

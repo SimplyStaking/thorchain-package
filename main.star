@@ -1,5 +1,6 @@
 input_parser = import_module("./src/package_io/input_parser.star")
 single_node_launcher = import_module("./src/network_launcher/single_node_launcher.star")
+cli_only_launcher = import_module("./src/network_launcher/cli_only_launcher.star")
 faucet = import_module("./src/faucet/faucet_launcher.star")
 bdjuno = import_module("./src/bdjuno/bdjuno_launcher.star")
 swap_ui = import_module("./src/swap-ui/swap_ui_launcher.star")
@@ -12,6 +13,13 @@ def run(plan, args):
     for chain in parsed_args["chains"]:
         chain_name = chain["name"]
         chain_id = chain["chain_id"]
+        config_type = chain.get("config_type", "network")
+
+        if config_type == "cli_only":
+            plan.print("Launching CLI utility container for {}".format(chain_name))
+            node_info = cli_only_launcher.launch_cli_only(plan, chain)
+            plan.print("✓ {} CLI utility ready!".format(node_info["name"]))
+            continue
         
         # Validate single-node configuration
         participant_count = 0
