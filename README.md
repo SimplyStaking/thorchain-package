@@ -196,10 +196,10 @@ chains:
     app_version: "3.11.0"
     forking:
       enabled: true
-      image: "tiljordan/thornode-forking:1.0.17"
+      image: "tiljordan/thornode-forking:1.0.18-23579848"
       height: 23015000
     participants:
-      - image: "tiljordan/thornode-forking:1.0.17"
+      - image: "tiljordan/thornode-forking:1.0.18-23579848"
         count: 1
         account_balance: 1000000000000
         bond_amount: 500000000000
