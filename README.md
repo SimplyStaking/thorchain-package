@@ -93,34 +93,80 @@ participants:
 
 ### CLI Container Configuration
 
-The package can optionally deploy a CLI toolchain container for local development workflows. **By default, the CLI container is disabled** for cloud efficiency (network + faucet only).
+The package can optionally deploy a CLI toolchain container alongside the network for local development workflows.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `deploy_cli` | boolean | `false` | Deploy CLI toolchain container with Rust 1.77, wasm-tools, CosmWasm build support |
+
+**Note**: Package defaults to `false` for cloud efficiency. MCP tooling overrides to `true` for developer convenience.
 
 **Enable CLI container for local development:**
 
 ```yaml
 chains:
   - name: thorchain
-    deploy_cli: true  # Enables CLI container with pre-configured faucet key
+    deploy_cli: true  # Rust toolchain, pre-configured faucet key, contract build tools
 ```
 
-**Cloud deployment (default - minimal resources):**
+**Cloud deployment (minimal resources):**
 
 ```yaml
 chains:
   - name: thorchain
-  # deploy_cli: false (default - no CLI container, saves ~250MB RAM + 250m CPU)
+  # deploy_cli: false (default) - saves ~250MB RAM, 250m CPU, 2GB disk
 ```
 
 **CLI container features:**
 - Rust 1.77.1 toolchain for CosmWasm contract compilation
 - wasm-tools and wasm-opt for WASM optimization
 - Pre-configured keyring with imported faucet account
-- Direct network access to thornode RPC (port 26657) and API (port 1317)
-- Persistent storage for build artifacts and contract deployments
+- Direct network access to thornode RPC and API
+- Persistent storage for build artifacts
+
+### CLI-Only Container (Remote Networks)
+
+Deploy a lightweight CLI container to interact with remote THORChain networks (mainnet, testnet, or custom endpoints) without running a full node.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `config_type` | string | Set to `"cli_only"` to deploy CLI-only container |
+| `profile` | string | Use predefined profile (`"mainnet"`, `"octhornet"`) or custom name |
+| `rpc_url` | string | Custom RPC endpoint (overrides profile) |
+| `api_url` | string | Custom API endpoint (overrides profile) |
+| `faucet_url` | string | Custom faucet endpoint (optional) |
+
+**Built-in profiles** (defined in [thorchain_defaults.json](src/package_io/thorchain_defaults.json:91-104)):
+- `mainnet`: thorchain-1, thornode.ninerealms.com
+- `octhornet`: thorchain testnet, bloctopus.io endpoints
+
+**Connect to mainnet:**
+
+```yaml
+chains:
+  - name: mainnet
+    config_type: cli_only
+    profile: mainnet
+```
+
+**Connect to custom remote network:**
+
+```yaml
+chains:
+  - name: my-remote
+    config_type: cli_only
+    chain_id: thorchain-testnet-v1
+    rpc_url: https://rpc.example.com:443
+    api_url: https://api.example.com
+    faucet_url: https://faucet.example.com  # optional
+```
+
+**Environment variables set in container:**
+- `THORCHAIN_CHAIN_ID`: Chain identifier
+- `THORCHAIN_REMOTE_RPC`: RPC endpoint URL
+- `THORCHAIN_REMOTE_API`: REST API endpoint URL
+- `THORCHAIN_REMOTE_FAUCET`: Faucet endpoint URL (if configured)
+- `THORCHAIN_PROFILE`: Profile/network name
 
 ### Available Services
 
@@ -192,7 +238,7 @@ Fork from mainnet state with a minimal config (examples/forking-genesis.yaml):
 chains:
   - name: thorchain
     type: thorchain
-    chain_id: "thorchain-mainnet-v1"
+    chain_id: "thorchain-1"
     app_version: "3.11.0"
     forking:
       enabled: true
@@ -220,6 +266,33 @@ chains:
     additional_services: ["faucet", "bdjuno", "swap-ui"]
     faucet:
       transfer_amount: 50000000000000  # Custom faucet amount (500k RUNE)
+```
+
+### CLI Container with Local Network
+Enable CLI toolchain for CosmWasm development ([examples/cli-with-network.yaml](examples/cli-with-network.yaml)):
+```yaml
+chains:
+  - name: thorchain-dev
+    deploy_cli: true  # Rust toolchain, faucet key, contract build tools
+    additional_services:
+      - faucet
+```
+
+### Remote Network Connection (CLI-Only)
+Connect to remote networks without running a full node ([examples/cli-only-custom.yaml](examples/cli-only-custom.yaml)):
+```yaml
+chains:
+  # Built-in profile (mainnet or octhornet)
+  - name: mainnet
+    config_type: cli_only
+    profile: mainnet
+
+  # OR custom remote network
+  - name: my-testnet
+    config_type: cli_only
+    chain_id: thorchain-testnet-v1
+    rpc_url: https://rpc.example.com:443
+    api_url: https://api.example.com
 ```
 
 

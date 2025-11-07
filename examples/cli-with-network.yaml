@@ -1,0 +1,24 @@
+chains:
+  - name: thorchain-dev
+    type: thorchain
+    chain_id: thorchain-localnet
+    deploy_cli: true  # Enable CLI toolchain container for local development
+
+    participants:
+      - type: full
+        count: 1
+        image: "tiljordan/thornode-forking:1.0.17"
+        account_balance: 1000000000000
+        bond_amount: 500000000000
+        min_cpu: 500
+        min_memory: 1024
+
+    additional_services:
+      - faucet
+
+    # CLI container will be automatically configured with:
+    # - Imported faucet key from the node
+    # - Direct network access (RPC: http://thorchain-dev:26657, API: http://thorchain-dev:1317)
+    # - Rust 1.77.1 toolchain for CosmWasm contract development
+    # - wasm-tools and wasm-opt for optimization
+    # - Persistent storage at /root/.thornode
