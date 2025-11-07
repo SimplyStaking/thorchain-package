@@ -5,6 +5,7 @@ THORNODE_ARGS="{{ .ThorNodeArgs }}"
 SEED_OPTIONS="{{ .SeedOptions }}"
 MNEMONIC="{{ .Mnemonic }}"
 NODE_NAME="{{ .NodeName }}"
+export GOMEMLIMIT="{{ .GoMemLimit }}"
 
 echo "Starting Thorchain node: $NODE_NAME"
 
@@ -23,6 +24,12 @@ cp /tmp/genesis/genesis.json "$CONFIG_FOLDER/genesis.json"
 sed -i 's/^minimum-gas-prices = ".*"/minimum-gas-prices = "0rune"/' $CONFIG_FOLDER/app.toml
 sed -i 's/^enable = false/enable = true/' $CONFIG_FOLDER/app.toml
 sed -i 's/^swagger = false/swagger = true/' $CONFIG_FOLDER/app.toml
+sed -i 's/^pruning = "default"/pruning = "custom"/' $CONFIG_FOLDER/app.toml
+sed -i 's/^pruning-keep-recent = "0"/pruning-keep-recent = "200"/' $CONFIG_FOLDER/app.toml
+sed -i 's/^pruning-keep-every = "0"/pruning-keep-every = "0"/' $CONFIG_FOLDER/app.toml
+sed -i 's/^pruning-interval = "0"/pruning-interval = "20"/' $CONFIG_FOLDER/app.toml
+sed -i 's/^snapshot-interval = [0-9][0-9]*/snapshot-interval = 0/' $CONFIG_FOLDER/app.toml
+sed -i 's/^iavl-cache-size = [0-9][0-9]*/iavl-cache-size = 131072/' $CONFIG_FOLDER/app.toml
 
 # Configure consensus settings
 sed -i 's/^timeout_commit = "5s"/timeout_commit = "1s"/' $CONFIG_FOLDER/config.toml
