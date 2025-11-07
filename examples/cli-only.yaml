@@ -1,0 +1,30 @@
+chains:
+  # Option 1: Use built-in profile (mainnet or octhornet)
+  # - name: mainnet
+  #   config_type: cli_only
+  #   profile: mainnet
+  #   # Provides: chain_id=thorchain-mainnet-v1, rpc_url=https://thornode.ninerealms.com:443
+
+  # Option 2: Custom remote network (uncomment to use)
+  - name: my-testnet
+    config_type: cli_only  # CLI-only mode (no full node)
+
+    # Custom remote network configuration
+    chain_id: thorchain-testnet-v1
+    rpc_url: https://rpc.mytestnet.example.com:443
+    api_url: https://api.mytestnet.example.com
+    faucet_url: https://faucet.mytestnet.example.com  # Optional
+
+    # Optional: Customize CLI container resources
+    min_cpu: 250      # Default: 250m
+    min_memory: 256   # Default: 128 MB
+
+    # Optional: Use custom CLI image
+    # cli_image: fravlaca/thor-cli-toolchain:0.1.0  # Default
+
+    # Container will have environment variables:
+    # THORCHAIN_CHAIN_ID=thorchain-testnet-v1
+    # THORCHAIN_REMOTE_RPC=https://rpc.mytestnet.example.com:443
+    # THORCHAIN_REMOTE_API=https://api.mytestnet.example.com
+    # THORCHAIN_REMOTE_FAUCET=https://faucet.mytestnet.example.com
+    # THORCHAIN_PROFILE=my-testnet
