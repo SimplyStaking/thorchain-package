@@ -651,18 +651,35 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         faucet_mnemonic = faucet_mnemonic_res.get("extract.mnemonic", "").strip()
         if faucet_mnemonic:
             import_script = """
-set -euo pipefail
+set -eu
 
 MNEMONIC=$(cat <<'EOF'
 {mnemonic}
 EOF
 )
 
-thornode keys delete faucet --keyring-backend test --yes >/dev/null 2>&1 || true
-printf '%s' "$MNEMONIC" | thornode keys add faucet --keyring-backend test --recover >/tmp/faucet-key.json
+ensure_faucet() {{
+  if thornode keys show faucet --keyring-backend test >/dev/null 2>&1; then
+    echo "[auto-config] key 'faucet' already present, skipping import"
+    return
+  fi
+  printf '%s' "$MNEMONIC" | thornode keys add faucet --keyring-backend test --recover >/tmp/faucet-key.json
+}}
 
-thornode keys delete default --keyring-backend test --yes >/dev/null 2>&1 || true
-printf '%s' "$MNEMONIC" | thornode keys add default --keyring-backend test --recover >/tmp/default-key.json
+ensure_default() {{
+  if thornode keys show default --keyring-backend test >/dev/null 2>&1; then
+    echo "[auto-config] key 'default' already present, leaving as-is"
+    return
+  fi
+  thornode keys add default --keyring-backend test >/tmp/default-key.json <<'EOF'
+
+EOF
+}}
+
+thornode keys delete faucet --keyring-backend test --yes >/dev/null 2>&1 || true
+ensure_faucet
+
+ensure_default
 """.format(
                 mnemonic=faucet_mnemonic
             )
