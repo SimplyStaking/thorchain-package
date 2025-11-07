@@ -68,7 +68,7 @@
     "enabled": true,
     "image": "tiljordan/thornode-forking:1.0.18-23579848",
     "grpc": "grpc.thor.pfc.zone:443",
-    "chain_id": "thorchain-mainnet-v1",
+    "chain_id": "thorchain-1",
     "height": 23043758,
     "diffs_api_base": "https://thorchain.bloctopus.io/bloctopus/diffs",
     "cache_enabled": true,
@@ -90,7 +90,7 @@
   },
   "cli_profiles": {
     "mainnet": {
-      "chain_id": "thorchain-mainnet-v1",
+      "chain_id": "thorchain-1",
       "rpc_url": "https://thornode.ninerealms.com:443",
       "api_url": "https://thornode.ninerealms.com",
       "faucet_url": ""
