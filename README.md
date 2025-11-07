@@ -137,7 +137,7 @@ Deploy a lightweight CLI container to interact with remote THORChain networks (m
 | `faucet_url` | string | Custom faucet endpoint (optional) |
 
 **Built-in profiles** (defined in [thorchain_defaults.json](src/package_io/thorchain_defaults.json:91-104)):
-- `mainnet`: thorchain-mainnet-v1, thornode.ninerealms.com
+- `mainnet`: thorchain-1, thornode.ninerealms.com
 - `octhornet`: thorchain testnet, bloctopus.io endpoints
 
 **Connect to mainnet:**
@@ -238,7 +238,7 @@ Fork from mainnet state with a minimal config (examples/forking-genesis.yaml):
 chains:
   - name: thorchain
     type: thorchain
-    chain_id: "thorchain-mainnet-v1"
+    chain_id: "thorchain-1"
     app_version: "3.11.0"
     forking:
       enabled: true

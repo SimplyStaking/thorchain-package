@@ -3,7 +3,7 @@ chains:
   # - name: mainnet
   #   config_type: cli_only
   #   profile: mainnet
-  #   # Provides: chain_id=thorchain-mainnet-v1, rpc_url=https://thornode.ninerealms.com:443
+  #   # Provides: chain_id=thorchain-1, rpc_url=https://thornode.ninerealms.com:443
 
   # Option 2: Custom remote network (uncomment to use)
   - name: my-testnet
