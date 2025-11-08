@@ -11,13 +11,6 @@ def apply_chain_defaults(chain, defaults):
     chain["type"] = chain.get("type", defaults["type"])
     chain["chain_id"] = chain.get("chain_id", defaults["chain_id"])
     chain["genesis_delay"] = chain.get("genesis_delay", defaults["genesis_delay"])
-    # Derive initial_height if forking is enabled and height is set
-    if chain.get("forking", {}).get("enabled", False):
-        h = chain["forking"].get("height", 0)
-        if (type(h) == "int" and h > 0):
-            chain["initial_height"] = h + 1
-
-    chain["initial_height"] = chain.get("initial_height", defaults["initial_height"])
     chain["chain_contracts"] = chain.get("chain_contracts", defaults["chain_contracts"])
     chain["app_version"] = chain.get("app_version", defaults["app_version"])
     chain["reserve_amount"] = chain.get("reserve_amount", defaults["reserve_amount"])
@@ -163,12 +156,6 @@ def input_parser(input_args=None):
 
             # Apply defaults to chain
             chain_config = apply_chain_defaults(chain, defaults)
-
-            # Derive initial_height again post-defaults to ensure consistency
-            if chain_config.get("forking", {}).get("enabled", False):
-                fh = chain_config["forking"].get("height", 0)
-                if (type(fh) == "int" and fh > 0):
-                    chain_config["initial_height"] = fh + 1
 
             result["chains"].append(chain_config)
 

@@ -7,7 +7,6 @@
   "reserve_amount": "0",
   "chain_contracts": [],
   "genesis_delay": 5,
-  "initial_height": 23043759,
   "deploy_cli": false,
   "denom": {
     "name": "rune",
