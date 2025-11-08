@@ -61,7 +61,8 @@
     }
   ],
   "additional_services": [
-    "faucet"
+    "faucet",
+    "bdjuno"
   ],
   "forking": {
     "enabled": true,
