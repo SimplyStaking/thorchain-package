@@ -64,10 +64,26 @@ def launch_postgres_service(plan, chain_name):
 
 
 def launch_bdjuno_service(plan, postgres_service, node_service, chain_name, chain_config):
-    # Get forking configuration
-    forking_config = chain_config.get("forking", {})
-    forking_enabled = forking_config.get("enabled", False)
-    forking_height = forking_config.get("height", 0)
+    # Read initial_height from the node's genesis file
+    # This is the actual starting height of the chain, which may differ from config
+    genesis_height_result = plan.exec(
+        service_name=node_service.name,
+        recipe=ExecRecipe(
+            command=["/bin/sh", "-c", "curl -s http://localhost:26657/genesis | grep -o '\"initial_height\":\"[0-9]*\"' | grep -o '[0-9]*' | head -n1"]
+        )
+    )
+    
+    # Extract the height from the result, with fallback to earliest_block_height if needed
+    initial_height = genesis_height_result.output.strip()
+    if initial_height == "" or initial_height == "0":
+        # Fallback: read earliest_block_height from /status
+        status_result = plan.exec(
+            service_name=node_service.name,
+            recipe=ExecRecipe(
+                command=["/bin/sh", "-c", "curl -s http://localhost:26657/status | grep -o '\"earliest_block_height\":\"[0-9]*\"' | grep -o '[0-9]*' | head -n1"]
+            )
+        )
+        initial_height = status_result.output.strip()
     
     # Render the configuration file
     bdjuno_config_data = {
@@ -77,8 +93,7 @@ def launch_bdjuno_service(plan, postgres_service, node_service, chain_name, chai
         "PostgresPort": postgres_service.ports["db"].number,
         "RpcPort": node_service.ports["rpc"].number,
         "GrpcPort": node_service.ports["grpc"].number,
-        "ForkingEnabled": forking_enabled,
-        "ForkingHeight": forking_height
+        "StartHeight": initial_height
     }
     bdjuno_config_artifact = plan.render_templates(
         config = {
