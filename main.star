@@ -39,11 +39,27 @@ def run(plan, args):
         plan.print("Waiting for {} to produce first block...".format(node_name))
 
         plan.exec(
-            service_name=node_name,
+            service_name = node_name,
             recipe = ExecRecipe(
-                command = ["timeout", "1800", "/bin/sh", "-c", "while [ $(curl -s localhost:26657/status | jq -r '.result.sync_info.latest_block_height') -le $(curl -s localhost:26657/status | jq -r '.result.sync_info.earliest_block_height') ]; do echo 'Waiting...'; sleep 1; done; echo 'Ready!'"]
+                command = [
+                    "timeout",
+                    "1800",
+                    "/bin/sh",
+                    "-c",
+                    """set -eu; while true; do
+          status=$(curl -sSf localhost:26657/status 2>/dev/null || true);
+          latest=$(printf '%s' "$status" | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null || echo '');
+          earliest=$(printf '%s' "$status" | jq -r '.result.sync_info.earliest_block_height // empty' 2>/dev/null || echo '');
+          if [ -n "$latest" ] && [ -n "$earliest" ] && [ "$latest" != "null" ] && [ "$earliest" != "null" ] && [ "$latest" -gt "$earliest" ] 2>/dev/null; then
+            echo 'Ready!';
+            break;
+          fi;
+          echo 'Waiting...';
+          sleep 1;
+        done"""
+                ],
             ),
-            description="Waiting for first block on {}".format(chain_name)
+            description = "Waiting for first block on %s" % chain_name,
         )
         
         plan.print("✓ {} is producing blocks!".format(node_name))
