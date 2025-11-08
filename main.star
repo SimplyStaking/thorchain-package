@@ -89,7 +89,7 @@ def run(plan, args):
                     faucet_mnemonic = faucet_mnemonic_res["extract.mnemonic"]
                     faucet.launch_faucet(plan, chain_name, chain_id, faucet_mnemonic, chain["faucet"]["transfer_amount"])
                 elif service == "bdjuno":
-                    service_launchers[service](plan, chain_name)
+                    service_launchers[service](plan, chain_name, chain)
                 elif service == "swap-ui":
                     forking_config = chain.get("forking", {})
                     prefunded_mnemonics = []

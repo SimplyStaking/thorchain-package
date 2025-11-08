@@ -1,4 +1,4 @@
-def launch_bdjuno(plan, chain_name):
+def launch_bdjuno(plan, chain_name, chain_config):
     postgres_service = launch_postgres_service(plan, chain_name)
 
     # Get the single node
@@ -7,7 +7,7 @@ def launch_bdjuno(plan, chain_name):
     )
 
     # Launch the bdjuno service
-    bdjuno_service, hasura_metadata_artifact = launch_bdjuno_service(plan, postgres_service, node, chain_name)
+    bdjuno_service, hasura_metadata_artifact = launch_bdjuno_service(plan, postgres_service, node, chain_name, chain_config)
 
     # Launch hasura service
     hasura_service = launch_hasura_service(plan, postgres_service, chain_name, hasura_metadata_artifact)
@@ -63,7 +63,12 @@ def launch_postgres_service(plan, chain_name):
     return postgres_service
 
 
-def launch_bdjuno_service(plan, postgres_service, node_service, chain_name):
+def launch_bdjuno_service(plan, postgres_service, node_service, chain_name, chain_config):
+    # Get forking configuration
+    forking_config = chain_config.get("forking", {})
+    forking_enabled = forking_config.get("enabled", False)
+    forking_height = forking_config.get("height", 0)
+    
     # Render the configuration file
     bdjuno_config_data = {
         "ChainPrefix": "thor",
@@ -71,7 +76,9 @@ def launch_bdjuno_service(plan, postgres_service, node_service, chain_name):
         "PostgresIP": postgres_service.ip_address,
         "PostgresPort": postgres_service.ports["db"].number,
         "RpcPort": node_service.ports["rpc"].number,
-        "GrpcPort": node_service.ports["grpc"].number
+        "GrpcPort": node_service.ports["grpc"].number,
+        "ForkingEnabled": forking_enabled,
+        "ForkingHeight": forking_height
     }
     bdjuno_config_artifact = plan.render_templates(
         config = {
