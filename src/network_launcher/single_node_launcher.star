@@ -14,7 +14,17 @@ def launch_single_node(plan, chain_cfg):
     account_balance = int(participant["account_balance"])
     bond_amount = int(participant.get("bond_amount", "500000000000"))
     faucet_amount = int(chain_cfg["faucet"]["faucet_amount"])
-    gomemlimit = participant.get("gomemlimit", "6GiB")
+    
+    # Performance optimization parameters
+    min_memory = participant.get("min_memory", 1024)
+    # Set GOMEMLIMIT to 60-70% of allocated memory for optimal GC performance
+    gomemlimit = participant.get("gomemlimit", "{}MiB".format(int(min_memory * 0.65)))
+    # IAVL cache size: larger values speed up state access but use more memory
+    iavl_cache_size = participant.get("iavl_cache_size", 131072)
+    # Database backend: pebbledb is faster than goleveldb for large state
+    db_backend = participant.get("db_backend", "pebbledb")
+    # Disable tx indexing to reduce write overhead during genesis import
+    tx_indexer = participant.get("tx_indexer", "null")
 
     app_version = chain_cfg["app_version"]
 
@@ -465,7 +475,7 @@ PY
     )
 
 
-    # j) Batch config updates
+    # j) Batch config updates with performance optimizations
     plan.exec(
         "base-service",
         ExecRecipe(
@@ -484,7 +494,7 @@ sed -i 's/^pruning-keep-recent = "0"/pruning-keep-recent = "200"/' "$APP"
 sed -i 's/^pruning-keep-every = "0"/pruning-keep-every = "0"/' "$APP"
 sed -i 's/^pruning-interval = "0"/pruning-interval = "20"/' "$APP"
 sed -i 's/^snapshot-interval = [0-9][0-9]*/snapshot-interval = 0/' "$APP"
-sed -i 's/^iavl-cache-size = [0-9][0-9]*/iavl-cache-size = 131072/' "$APP"
+sed -i 's/^iavl-cache-size = [0-9][0-9]*/iavl-cache-size = %(iavl_cache_size)d/' "$APP"
 
 sed -i 's/^timeout_commit = "5s"/timeout_commit = "1s"/' "$CFG"
 sed -i 's/^timeout_propose = "3s"/timeout_propose = "1s"/' "$CFG"
@@ -497,6 +507,10 @@ sed -i 's/^seeds = ".*"/seeds = ""/' "$CFG"
 sed -i 's/^laddr = "tcp:\\/\\/127.0.0.1:26657"/laddr = "tcp:\\/\\/0.0.0.0:26657"/' "$CFG"
 sed -i 's/^cors_allowed_origins = \\[\\]/cors_allowed_origins = ["*"]/' "$CFG"
 
+# Performance optimizations: use pebbledb backend and disable tx indexing
+sed -i 's/^db_backend = ".*"/db_backend = "%(db_backend)s"/' "$CFG"
+sed -i 's/^indexer = ".*"/indexer = "%(tx_indexer)s"/' "$CFG"
+
 sed -i 's/^address = "localhost:9090"/address = "0.0.0.0:9090"/' "$APP"
 
 sed -i 's/^address = "tcp:\\/\\/localhost:1317"/address = "tcp:\\/\\/0.0.0.0:1317"/' "$APP"
@@ -504,10 +518,10 @@ sed -i 's/^enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP"
 
 sed -i 's/^prometheus = false/prometheus = true/' "$CFG"
 sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:26660"/' "$CFG"
-""" % {"cfg": config_folder},
+""" % {"cfg": config_folder, "iavl_cache_size": iavl_cache_size, "db_backend": db_backend, "tx_indexer": tx_indexer},
             ]
         ),
-        description="Apply node configuration (API/RPC/gRPC/Prometheus/P2P)",
+        description="Apply node configuration with performance optimizations (pebbledb, no indexing, IAVL cache)",
     )
 
     # # Copy thornode folder to persistent volume
