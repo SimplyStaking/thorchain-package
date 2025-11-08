@@ -17,8 +17,6 @@ def launch_single_node(plan, chain_cfg):
     gomemlimit = participant.get("gomemlimit", "6GiB")
 
     app_version = chain_cfg["app_version"]
-    req_height = int(forking_config.get("height", 0))
-    initial_height = str(req_height + 1) if req_height > 0 else str(chain_cfg.get("initial_height", 1))
 
     # Calculate genesis time
     genesis_delay = chain_cfg.get("genesis_delay", 5)
@@ -249,61 +247,8 @@ PY
         ),
         description="Prepare small JSON payloads and total RUNE supply",
     )
-    # Build faucet balances and supply updates for all denoms at requested height
-    # Validate requested fork height and fetch cumulative KV diffs if needed
-    plan.exec(
-        "base-service",
-        ExecRecipe(
-            command=[
-                "/bin/sh",
-                "-lc",
-                "echo 'diff fetch disabled' > /tmp/diff.info"
-            ],
-        ),
-        description="Fetch diffs meta and cumulative KV patch",
-    )
 
-    # e.1) Apply cumulative KV diffs using uploaded merge_patch.py (mounted via ServiceConfig.files)
-    plan.exec(
-        "base-service",
-        ExecRecipe(
-            command=[
-                "/bin/sh",
-                "-lc",
-                "echo 'merge_patch disabled; skipping cumulative KV patch apply'",
-            ],
-        ),
-        description="Apply merge_patch.py to patch genesis in one sed pass",
-    )
-    # e.2) Minimal observability for fetch/merge
-    plan.exec(
-        "base-service",
-        ExecRecipe(
-            command=[
-                "/bin/sh",
-                "-lc",
-                "set -e; echo '=== diff.info ==='; [ -f /tmp/diff.info ] && sed -n '1,50p' /tmp/diff.info || echo 'no diff.info'; echo '=== genesis parse check ==='; python3 - <<'PY'\nimport json,sys\np='/root/.thornode/config/genesis.json'\ntry:\n  json.load(open(p))\n  print('ok')\nexcept Exception as e:\n  print('bad:', e)\nPY"
-            ],
-        ),
-        description="Log diff/meta sizes and sed rule head"
-    )
-    # e.3) Scan thorchain for stringified JSON to catch bad fields early
-    plan.exec(
-        "base-service",
-        ExecRecipe(
-            command=[
-                "/bin/sh",
-                "-lc",
-                "set -e; python3 - <<'PY'\nimport json\np='%(cfg)s/genesis.json'\nj=json.load(open(p))\nth=j.get('app_state',{}).get('thorchain',{})\nstack=[([], th)]\nbad=[]\nlim=0\nwhile stack and lim<200000:\n  lim+=1\n  path,v=stack.pop()\n  if isinstance(v, dict):\n    for k in list(v.keys()): stack.append((path+[k], v[k]))\n  elif isinstance(v, list):\n    for i,x in enumerate(v[:200]): stack.append((path+[str(i)], x))\n  elif isinstance(v, str):\n    s=v.strip()\n    if s[:1] in '[{': bad.append(('.'.join(path), s[:100].replace('\\n',' ')))\nprint('thorchain_stringified_json_count', len(bad))\nfor p,prev in bad[:20]: print('bad', p, prev)\nPY" % {"cfg": config_folder}
-            ],
-        ),
-        description="Scan thorchain for stringified JSON values"
-    )
-
-
-
-
-    faucet_height = str(chain_cfg.get("forking", {}).get("height", 23010004))
+    # Build faucet balances and supply updates for all denoms
     plan.exec(
         "base-service",
         ExecRecipe(
@@ -312,8 +257,7 @@ PY
                 "-lc",
                 """
 set -e
-H=%(height)s
-curl -sS -H "x-cosmos-block-height: $H" "https://thornode.ninerealms.com/cosmos/bank/v1beta1/supply?pagination.limit=500" -o /tmp/supply.json
+curl -sS "https://thornode.ninerealms.com/cosmos/bank/v1beta1/supply?pagination.limit=500" -o /tmp/supply.json
 python3 - << 'PY'
 import json
 from pathlib import Path
@@ -366,7 +310,7 @@ for entry in supply_list:
         updated.append({"denom": d, "amount": add(str(a), str(faucet_amount))})
 Path("/tmp/supply_fragment.json").write_text(json.dumps(updated, separators=(",",":")))
 PY
-""" % {"height": faucet_height, "faucet_addr": faucet_addr, "faucet_amount": faucet_amount},
+""" % {"faucet_addr": faucet_addr, "faucet_amount": faucet_amount},
             ],
         ),
         description="Prepare faucet multi-denom balances and updated supply from ninerealms",
@@ -468,7 +412,6 @@ su="$(tr -d '\n\r' </tmp/supply_str.json || true)"
 # Scalars from launcher
 GENESIS_TIME=%(genesis_time)s
 CHAIN_ID=%(chain_id)s
-INITIAL_HEIGHT=%(initial_height)s
 APP_VERSION=%(app_version)s
 RESERVE="$rs"
 
@@ -477,7 +420,6 @@ escape() { printf '%%s' "$1" | sed -e 's/[&/\\\\]/\\\\&/g'; }
 sed -i \
   -e "s/\\"__GENESIS_TIME__\\"/\\"$(escape "$GENESIS_TIME")\\"/" \
   -e "s/\\"__CHAIN_ID__\\"/\\"$(escape "$CHAIN_ID")\\"/" \
-  -e "s/\\"__INITIAL_HEIGHT__\\"/\\"$(escape "$INITIAL_HEIGHT")\\"/" \
   -e "s/\\"__APP_VERSION__\\"/\\"$(escape "$APP_VERSION")\\"/" \
   -e "s/\\"__RESERVE__\\"/\\"$(escape "$RESERVE")\\"/" \
   -e "s/\\"__CONSENSUS_BLOCK__\\"/$(escape "$cb")/" \
@@ -513,7 +455,6 @@ PY
                     "cfg": config_folder,
                     "genesis_time": genesis_time,
                     "chain_id": chain_id,
-                    "initial_height": initial_height,
                     "app_version": app_version,
                     "faucet_addr": faucet_addr,
                     "faucet_amount": faucet_amount,
@@ -694,23 +635,8 @@ ensure_default
     else:
         plan.print("CLI container skipped (use deploy_cli: true to enable)")
 
-    # Final: start thornode in background so plan continues
-    # plan.exec(
-    #     node_name,
-    #     ExecRecipe(
-    #         command=[
-    #             "/bin/sh",
-    #             "-lc",
-    #             "nohup sh -c \"printf 'validator\\nTestPassword!\\n' | {bin} start\" >/var/log/thornode.out 2>&1 & echo $! >/tmp/thornode.pid; sleep 1".format(
-    #                 bin=binary
-    #             ),
-    #         ],
-    #     ),
-    #     description="Start thornode in background",
-    # )
-
     return {
         "name": node_name,
-        "ip": base_service.ip_address,
+        "ip": node_service.ip_address,
         "cli_service": cli_name,
     }

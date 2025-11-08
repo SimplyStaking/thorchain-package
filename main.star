@@ -37,23 +37,29 @@ def run(plan, args):
         
         # Wait for first block
         plan.print("Waiting for {} to produce first block...".format(node_name))
-        forking_config = chain.get("forking", {})
-        forking_height = str(forking_config.get("height", 0) + 1)
-        plan.wait(
-            service_name=node_name,
-            recipe=GetHttpRequestRecipe(
-                port_id="rpc",
-                endpoint="/status",
-                extract={
-                    "block": ".result.sync_info.latest_block_height"
-                }
+
+        plan.exec(
+            service_name = node_name,
+            recipe = ExecRecipe(
+                command = [
+                    "timeout",
+                    "1800",
+                    "/bin/sh",
+                    "-c",
+                    """set -eu; while true; do
+          status=$(curl -sSf localhost:26657/status 2>/dev/null || true);
+          latest=$(printf '%s' "$status" | jq -r '.result.sync_info.latest_block_height // empty' 2>/dev/null || echo '');
+          earliest=$(printf '%s' "$status" | jq -r '.result.sync_info.earliest_block_height // empty' 2>/dev/null || echo '');
+          if [ -n "$latest" ] && [ -n "$earliest" ] && [ "$latest" != "null" ] && [ "$earliest" != "null" ] && [ "$latest" -gt "$earliest" ] 2>/dev/null; then
+            echo 'Ready!';
+            break;
+          fi;
+          echo 'Waiting...';
+          sleep 1;
+        done"""
+                ],
             ),
-            field="extract.block",
-            assertion=">",
-            target_value=forking_height,
-            interval="2s",
-            timeout="30m",
-            description="Waiting for first block on {}".format(chain_name)
+            description = "Waiting for first block on %s" % chain_name,
         )
         
         plan.print("✓ {} is producing blocks!".format(node_name))

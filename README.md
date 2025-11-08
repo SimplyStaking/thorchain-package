@@ -255,7 +255,7 @@ chains:
     additional_services:
       - faucet
 ```
-Note: initial_height is computed automatically as forking.height + 1.
+Note: the launcher now reads `initial_height` directly from the generated `genesis.json`, so no manual override is necessary.
 
 ### Custom Services
 Deploy specific auxiliary services:
