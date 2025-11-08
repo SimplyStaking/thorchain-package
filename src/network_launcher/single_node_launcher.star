@@ -19,10 +19,21 @@ def launch_single_node(plan, chain_cfg):
     min_memory = participant.get("min_memory", 1024)
     # Set GOMEMLIMIT to 60-70% of allocated memory for optimal GC performance
     gomemlimit = participant.get("gomemlimit", "{}MiB".format(int(min_memory * 0.65)))
-    # IAVL cache size: larger values speed up state access but use more memory
-    iavl_cache_size = participant.get("iavl_cache_size", 131072)
-    # Database backend: pebbledb is faster than goleveldb for large state
-    db_backend = participant.get("db_backend", "pebbledb")
+    # GOGC: increase to reduce GC frequency during large genesis import
+    gogc = participant.get("gogc", "200")
+    
+    # IAVL cache size: autosize based on available memory to avoid OOM
+    # Formula: ~256 bytes per cached node, use up to 40% of RAM, capped at 1M nodes
+    # This significantly speeds up state access during genesis import
+    default_iavl_cache = min(max(131072, int((min_memory * 1024 * 1024 * 0.4) / 256)), 1048576)
+    iavl_cache_size = participant.get("iavl_cache_size", default_iavl_cache)
+    
+    # Disable IAVL fastnode to reduce write overhead during genesis import
+    # Fastnode speeds queries but adds extra writes during initial state building
+    iavl_disable_fastnode = participant.get("iavl_disable_fastnode", True)
+    
+    # Database backend: goleveldb (pebbledb not supported in this thornode version)
+    db_backend = participant.get("db_backend", "goleveldb")
     # Disable tx indexing to reduce write overhead during genesis import
     tx_indexer = participant.get("tx_indexer", "null")
 
@@ -496,6 +507,13 @@ sed -i 's/^pruning-interval = "0"/pruning-interval = "20"/' "$APP"
 sed -i 's/^snapshot-interval = [0-9][0-9]*/snapshot-interval = 0/' "$APP"
 sed -i 's/^iavl-cache-size = [0-9][0-9]*/iavl-cache-size = %(iavl_cache_size)d/' "$APP"
 
+# Disable IAVL fastnode to reduce write overhead during genesis import
+if grep -q "^iavl-disable-fastnode" "$APP"; then
+  sed -i 's/^iavl-disable-fastnode = .*/iavl-disable-fastnode = %(iavl_disable_fastnode)s/' "$APP"
+elif grep -q "^iavl-enable-fastnode" "$APP"; then
+  sed -i 's/^iavl-enable-fastnode = .*/iavl-enable-fastnode = %(iavl_enable_fastnode)s/' "$APP"
+fi
+
 sed -i 's/^timeout_commit = "5s"/timeout_commit = "1s"/' "$CFG"
 sed -i 's/^timeout_propose = "3s"/timeout_propose = "1s"/' "$CFG"
 
@@ -518,10 +536,17 @@ sed -i 's/^enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP"
 
 sed -i 's/^prometheus = false/prometheus = true/' "$CFG"
 sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:26660"/' "$CFG"
-""" % {"cfg": config_folder, "iavl_cache_size": iavl_cache_size, "db_backend": db_backend, "tx_indexer": tx_indexer},
+""" % {
+                    "cfg": config_folder, 
+                    "iavl_cache_size": iavl_cache_size, 
+                    "db_backend": db_backend, 
+                    "tx_indexer": tx_indexer,
+                    "iavl_disable_fastnode": "true" if iavl_disable_fastnode else "false",
+                    "iavl_enable_fastnode": "false" if iavl_disable_fastnode else "true",
+                },
             ]
         ),
-        description="Apply node configuration with performance optimizations (pebbledb, no indexing, IAVL cache)",
+        description="Apply node configuration with performance optimizations (goleveldb, no indexing, autosized IAVL cache, fastnode disabled)",
     )
 
     # # Copy thornode folder to persistent volume
@@ -549,9 +574,10 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
             entrypoint=[
                 "/bin/sh",
                 "-lc",
-                "set -e; THOR_HOME=/tmp/execution-data/.thornode; if [ ! -d \"$THOR_HOME\" ]; then echo 'missing thornode home in persistent volume' >&2; exit 1; fi; ln -sfn \"$THOR_HOME\" /root/.thornode; export GOMEMLIMIT='{gomemlimit}'; printf 'validator\\nTestPassword!\\n' | {bin} start --home \"$THOR_HOME\"".format(
+                "set -e; THOR_HOME=/tmp/execution-data/.thornode; if [ ! -d \"$THOR_HOME\" ]; then echo 'missing thornode home in persistent volume' >&2; exit 1; fi; ln -sfn \"$THOR_HOME\" /root/.thornode; export GOMEMLIMIT='{gomemlimit}'; export GOGC='{gogc}'; printf 'validator\\nTestPassword!\\n' | {bin} start --home \"$THOR_HOME\"".format(
                     bin=binary,
                     gomemlimit=gomemlimit,
+                    gogc=gogc,
                 )
             ],
             min_cpu=participant.get("min_cpu", 500),
