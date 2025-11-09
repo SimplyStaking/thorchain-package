@@ -69,13 +69,13 @@ def launch_bdjuno_service(plan, postgres_service, node_service, chain_name, chai
     status_result = plan.exec(
         service_name=node_service.name,
         recipe=ExecRecipe(
-            command=["/bin/sh", "-c", "curl -s http://localhost:26657/status | grep -o '\"earliest_block_height\":\"[0-9]*\"' | grep -o '[0-9]*' | head -n1"],
+            command=["/bin/sh", "-c", "curl -s http://localhost:26657/status | grep -o '\"earliest_block_height\":\"[0-9]*\"' | grep -o '[0-9]*' | head -n1 | tr -d '\\n'"],
             extract={"height": "."}
         )
     )
     
     # Extract the height from the result
-    initial_height = status_result["extract.height"].strip()
+    initial_height = status_result["extract.height"]
     
     # Render the configuration file
     bdjuno_config_data = {
