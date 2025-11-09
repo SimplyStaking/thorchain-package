@@ -64,28 +64,18 @@ def launch_postgres_service(plan, chain_name):
 
 
 def launch_bdjuno_service(plan, postgres_service, node_service, chain_name, chain_config):
-    # Read initial_height from the node's genesis file
-    # This is the actual starting height of the chain, which may differ from config
-    genesis_height_result = plan.exec(
+    # Read earliest_block_height from the node's /status endpoint
+    # This is the actual starting height of the chain (works for both forked and non-forked chains)
+    status_result = plan.exec(
         service_name=node_service.name,
         recipe=ExecRecipe(
-            command=["/bin/sh", "-c", "curl -s http://localhost:26657/genesis | grep -o '\"initial_height\":\"[0-9]*\"' | grep -o '[0-9]*' | head -n1"],
+            command=["/bin/sh", "-c", "curl -s http://localhost:26657/status | grep -o '\"earliest_block_height\":\"[0-9]*\"' | grep -o '[0-9]*' | head -n1"],
             extract={"height": "."}
         )
     )
     
-    # Extract the height from the result, with fallback to earliest_block_height if needed
-    initial_height = genesis_height_result["extract.height"].strip()
-    if initial_height == "" or initial_height == "0":
-        # Fallback: read earliest_block_height from /status
-        status_result = plan.exec(
-            service_name=node_service.name,
-            recipe=ExecRecipe(
-                command=["/bin/sh", "-c", "curl -s http://localhost:26657/status | grep -o '\"earliest_block_height\":\"[0-9]*\"' | grep -o '[0-9]*' | head -n1"],
-                extract={"height": "."}
-            )
-        )
-        initial_height = status_result["extract.height"].strip()
+    # Extract the height from the result
+    initial_height = status_result["extract.height"].strip()
     
     # Render the configuration file
     bdjuno_config_data = {
