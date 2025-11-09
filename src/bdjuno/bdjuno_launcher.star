@@ -1,4 +1,4 @@
-def launch_bdjuno(plan, chain_name):
+def launch_bdjuno(plan, chain_name, chain_config):
     postgres_service = launch_postgres_service(plan, chain_name)
 
     # Get the single node
@@ -7,7 +7,7 @@ def launch_bdjuno(plan, chain_name):
     )
 
     # Launch the bdjuno service
-    bdjuno_service, hasura_metadata_artifact = launch_bdjuno_service(plan, postgres_service, node, chain_name)
+    bdjuno_service, hasura_metadata_artifact = launch_bdjuno_service(plan, postgres_service, node, chain_name, chain_config)
 
     # Launch hasura service
     hasura_service = launch_hasura_service(plan, postgres_service, chain_name, hasura_metadata_artifact)
@@ -63,7 +63,20 @@ def launch_postgres_service(plan, chain_name):
     return postgres_service
 
 
-def launch_bdjuno_service(plan, postgres_service, node_service, chain_name):
+def launch_bdjuno_service(plan, postgres_service, node_service, chain_name, chain_config):
+    # Read earliest_block_height from the node's /status endpoint
+    # This is the actual starting height of the chain (works for both forked and non-forked chains)
+    status_result = plan.exec(
+        service_name=node_service.name,
+        recipe=ExecRecipe(
+            command=["/bin/sh", "-c", "curl -s http://localhost:26657/status | grep -o '\"earliest_block_height\":\"[0-9]*\"' | grep -o '[0-9]*' | head -n1 | tr -d '\\n'"],
+            extract={"height": "."}
+        )
+    )
+    
+    # Extract the height from the result
+    initial_height = status_result["extract.height"]
+    
     # Render the configuration file
     bdjuno_config_data = {
         "ChainPrefix": "thor",
@@ -71,7 +84,8 @@ def launch_bdjuno_service(plan, postgres_service, node_service, chain_name):
         "PostgresIP": postgres_service.ip_address,
         "PostgresPort": postgres_service.ports["db"].number,
         "RpcPort": node_service.ports["rpc"].number,
-        "GrpcPort": node_service.ports["grpc"].number
+        "GrpcPort": node_service.ports["grpc"].number,
+        "StartHeight": initial_height
     }
     bdjuno_config_artifact = plan.render_templates(
         config = {
@@ -170,7 +184,7 @@ def launch_big_dipper(plan,chain_name):
     big_dipper_service = plan.add_service(
         name="{}-big-dipper-service".format(chain_name),
         config=ServiceConfig(
-            image="tiljordan/thorchain-ui:1.0.13",
+            image="tiljordan/thorchain-ui:1.0.14",
             env_vars={
                 "NEXT_PUBLIC_CHAIN_TYPE": "Testnet",
                 "PORT": "3000",
