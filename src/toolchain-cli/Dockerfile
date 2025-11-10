@@ -1,4 +1,4 @@
-FROM tiljordan/thornode-forking:1.0.19-23596070
+FROM tiljordan/thornode-forking:1.0.20-23621657
 
 SHELL ["/bin/bash", "-lc"]
 
