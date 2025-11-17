@@ -5,7 +5,7 @@ The thorchain-package now supports prefunding accounts at genesis time through t
 ## Configuration
 
 Add `prefunded_accounts` to your chain configuration as a key-value object where:
-- **Key**: Either a THORChain address (starting with "thor") or a mnemonic phrase
+- **Key**: A THORChain address (starting with `thor`)
 - **Value**: The amount to prefund (as a string, in base units)
 
 ### Example Configuration
@@ -15,8 +15,15 @@ chains:
   - name: "thorchain-test"
     type: "thorchain"
     prefunded_accounts:
-      "thor1abc123def456ghi789jkl012mno345pqr678stu": "1000000000000"  # Direct address
-      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about": "2000000000000"  # Mnemonic (will be converted)
+      "thor1abc123def456ghi789jkl012mno345pqr678stu": "1000000000000"
+      "thor1xyz987uvw654rst321opq098lmn765def432cba": "2000000000000"
+
+    # Optional: preload the mnemonic corresponding to an address inside your CLI container
+    cli_service:
+      preload_keys:
+        - name: alice
+          mnemonic: "<24-word mnemonic for thor1abc123def456ghi789jkl012mno345pqr678stu>"
+      default_account: alice
 ```
 
 ## TypeScript Integration
@@ -72,19 +79,8 @@ npm install @cosmjs/crypto @cosmjs/amino
 
 ### Usage Options
 
-You have two options for prefunding accounts:
-
-1. **Use the address directly** (if you've already generated it):
-   ```yaml
-   prefunded_accounts:
-     "thor1your_generated_address_here": "1000000000000"
-   ```
-
-2. **Use the mnemonic** (the package will convert it automatically):
-   ```yaml
-   prefunded_accounts:
-     "your twelve word mnemonic phrase goes here like this example": "1000000000000"
-   ```
+1. **Derive the address externally** using the TypeScript or Go snippets above, then place only the address inside `prefunded_accounts`.
+2. **(Optional) Preload mnemonics into CLI containers** via `cli_service.preload_keys` (or `preload_keys` when launching a standalone CLI utility). This keeps prefunding secure while still giving the CLI keyring convenient access to funded accounts.
 
 ## Go Address Derivation
 
