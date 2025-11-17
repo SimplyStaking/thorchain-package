@@ -1,5 +1,6 @@
 toolchain = import_module("./toolchain.star")
 cli_only_launcher = import_module("./cli_only_launcher.star")
+cli_key_manager = import_module("./cli_key_manager.star")
 
 def launch_single_node(plan, chain_cfg):
     chain_name = chain_cfg["name"]
@@ -179,6 +180,22 @@ def launch_single_node(plan, chain_cfg):
         description="Persist faucet mnemonic for downstream faucet launcher",
     )
 
+    # Extract prefunded accounts from configuration
+    prefunded_accounts = chain_cfg.get("prefunded_accounts", {})
+    prefunded_list = []
+    prefunded_rune_total = 0
+    for addr in prefunded_accounts:
+        amount = prefunded_accounts[addr]
+        amount_int = int(amount)
+        prefunded_list.append({"address": addr, "amount": amount_int})
+        prefunded_rune_total = prefunded_rune_total + amount_int
+
+    plan.print("Prefunded accounts configured: {}".format(len(prefunded_list)))
+    for pf in prefunded_list:
+        plan.print("  - {} with {} base units".format(pf["address"][:20] + "...", pf["amount"]))
+    if prefunded_rune_total > 0:
+        plan.print("Total RUNE distributed to prefunded accounts: {}".format(prefunded_rune_total))
+
     # g) Prepare JSON payloads and compute totals (single Python pass)
     plan.exec(
         "base-service",
@@ -197,8 +214,10 @@ cons_pk = %(cons_pk)r
 app_version = %(app_version)r
 account_balance = %(account_balance)d
 faucet_amount = %(faucet_amount)d
+prefunded_list = %(prefunded_list)r
+prefunded_rune_total = %(prefunded_rune_total)d
 mainnet_rune_supply = 42537131234170029
-total_rune_supply = mainnet_rune_supply + account_balance + faucet_amount
+total_rune_supply = mainnet_rune_supply + account_balance + faucet_amount + prefunded_rune_total
 
 node_accounts = [{
   "active_block_height": "0",
@@ -222,6 +241,20 @@ balances = [
   {"address": faucet_addr, "coins": [{"amount": str(faucet_amount), "denom": "rune"}]},
 ]
 
+# Add prefunded accounts
+for pf in prefunded_list:
+    accounts.append({
+        "@type": "/cosmos.auth.v1beta1.BaseAccount",
+        "account_number": "0",
+        "address": pf["address"],
+        "pub_key": None,
+        "sequence": "0"
+    })
+    balances.append({
+        "address": pf["address"],
+        "coins": [{"amount": str(pf["amount"]), "denom": "rune"}]
+    })
+
 open("/tmp/node_accounts.json","w").write(json.dumps(node_accounts))
 open("/tmp/accounts.json","w").write(json.dumps(accounts))
 open("/tmp/balances.json","w").write(json.dumps(balances))
@@ -242,6 +275,8 @@ PY
                     "faucet_amount": faucet_amount,
                     "bond_amount": bond_amount,
                     "consensus_block": consensus_block,
+                    "prefunded_list": prefunded_list,
+                    "prefunded_rune_total": prefunded_rune_total,
                 },
             ]
         ),
@@ -263,6 +298,7 @@ import json
 from pathlib import Path
 faucet_addr = %(faucet_addr)r
 faucet_amount = %(faucet_amount)d
+prefunded_list = %(prefunded_list)r
 # Read supply from ninerealms
 try:
     s = json.loads(Path("/tmp/supply.json").read_text() or "{}")
@@ -293,9 +329,16 @@ except Exception:
     arr = []
 arr = [b for b in arr if not (isinstance(b, dict) and b.get("address")==faucet_balance["address"])]
 arr.append(faucet_balance)
+# Add prefunded accounts with all denoms
+for pf in prefunded_list:
+    pf_coins = [{"amount": str(pf["amount"]), "denom": d} for d in denoms]
+    pf_balance = {"address": pf["address"], "coins": pf_coins}
+    # Remove any existing entry for this address
+    arr = [b for b in arr if not (isinstance(b, dict) and b.get("address")==pf_balance["address"])]
+    arr.append(pf_balance)
 Path("/tmp/merged_balances_fragment.json").write_text(", ".join(json.dumps(x, separators=(",",":")) for x in arr))
-# Compute updated supply = upstream supply + faucet_amount per denom
-def add(a,b): 
+# Compute updated supply = upstream supply + faucet_amount + prefunded amounts per denom
+def add(a,b):
     try:
         return str(int(a)+int(b))
     except Exception:
@@ -307,13 +350,18 @@ for entry in supply_list:
     d = entry.get("denom")
     a = entry.get("amount")
     if isinstance(d, str) and isinstance(a, (str,int)):
-        updated.append({"denom": d, "amount": add(str(a), str(faucet_amount))})
+        # Add faucet amount
+        total = add(str(a), str(faucet_amount))
+        # Add all prefunded amounts
+        for pf in prefunded_list:
+            total = add(total, str(pf["amount"]))
+        updated.append({"denom": d, "amount": total})
 Path("/tmp/supply_fragment.json").write_text(json.dumps(updated, separators=(",",":")))
 PY
-""" % {"faucet_addr": faucet_addr, "faucet_amount": faucet_amount},
+""" % {"faucet_addr": faucet_addr, "faucet_amount": faucet_amount, "prefunded_list": prefunded_list},
             ],
         ),
-        description="Prepare faucet multi-denom balances and updated supply from ninerealms",
+        description="Prepare faucet and prefunded account multi-denom balances and updated supply from ninerealms",
     )
 
 
@@ -366,9 +414,9 @@ def load_list_text(path):
     p=Path(path)
     if not p.exists(): return ""
     return p.read_text().strip()
-def load_list(path):
-    txt = load_list_text(path)
-    if not txt: return []
+def parse_list(txt):
+    if not txt:
+        return []
     try:
         return json.loads(f"[{txt}]")
     except Exception:
@@ -377,7 +425,14 @@ def load_list(path):
             return j if isinstance(j, list) else [j]
         except Exception:
             return []
-bl = load_list("/tmp/balances_fragment.json")
+def load_list(path):
+    return parse_list(load_list_text(path))
+def load_balances():
+    merged = parse_list(load_list_text("/tmp/merged_balances_fragment.json"))
+    if merged:
+        return merged
+    return load_list("/tmp/balances_fragment.json")
+bl = load_balances()
 denoms=set()
 for b in bl:
     if isinstance(b, dict):
@@ -590,47 +645,14 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
             description="Read faucet mnemonic for CLI key import",
         )
         faucet_mnemonic = faucet_mnemonic_res.get("extract.mnemonic", "").strip()
-        if faucet_mnemonic:
-            import_script = """
-set -eu
-
-MNEMONIC=$(cat <<'EOF'
-{mnemonic}
-EOF
-)
-
-ensure_faucet() {{
-  if thornode keys show faucet --keyring-backend test >/dev/null 2>&1; then
-    echo "[auto-config] key 'faucet' already present, skipping import"
-    return
-  fi
-  printf '%s' "$MNEMONIC" | thornode keys add faucet --keyring-backend test --recover >/tmp/faucet-key.json
-}}
-
-ensure_default() {{
-  if thornode keys show default --keyring-backend test >/dev/null 2>&1; then
-    echo "[auto-config] key 'default' already present, leaving as-is"
-    return
-  fi
-  thornode keys add default --keyring-backend test >/tmp/default-key.json <<'EOF'
-
-EOF
-}}
-
-thornode keys delete faucet --keyring-backend test --yes >/dev/null 2>&1 || true
-ensure_faucet
-
-ensure_default
-""".format(
-                mnemonic=faucet_mnemonic
-            )
-            plan.exec(
-                cli_name,
-                ExecRecipe(
-                    command=["/bin/sh", "-lc", import_script],
-                ),
-                description="Import faucet key into CLI toolchain",
-            )
+        cli_key_manager.configure_cli_keys(
+            plan,
+            cli_name,
+            faucet_mnemonic=faucet_mnemonic,
+            preload_keys=cli_cfg.get("preload_keys", []),
+            prefunded_accounts=chain_cfg.get("prefunded_accounts", {}),
+            default_account=cli_cfg.get("default_account", "default"),
+        )
         plan.print("CLI container '{}' provisioned".format(cli_name))
     else:
         plan.print("CLI container skipped (use deploy_cli: true to enable)")

@@ -22,6 +22,7 @@
     "faucet_amount": 1000000000000000,
     "transfer_amount": 10000000000000
   },
+  "prefunded_accounts": {},
   "consensus": {
     "block_max_bytes": 22020096,
     "block_max_gas": -1,

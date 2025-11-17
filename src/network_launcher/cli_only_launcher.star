@@ -19,6 +19,7 @@ def _build_env(chain_cfg):
 
 
 toolchain = import_module("./toolchain.star")
+cli_key_manager = import_module("./cli_key_manager.star")
 
 def launch_cli_only(plan, chain_cfg):
     network_name = chain_cfg.get("name", "thorchain-cli")
@@ -59,18 +60,13 @@ def launch_cli_only(plan, chain_cfg):
         description="Initialize thornode home for CLI operations",
     )
 
-    ensure_default_key = """
-set -eu
-thornode keys show default --keyring-backend test --output json >/tmp/default-key.json 2>/dev/null || \
-thornode keys add default --keyring-backend test --output json >/tmp/default-key.json
-"""
-
-    plan.exec(
+    cli_key_manager.configure_cli_keys(
+        plan,
         service_name,
-        ExecRecipe(
-            command=["/bin/sh", "-lc", ensure_default_key],
-        ),
-        description="Ensure default CLI key exists",
+        faucet_mnemonic="",
+        preload_keys=chain_cfg.get("preload_keys", []),
+        prefunded_accounts=chain_cfg.get("prefunded_accounts", {}),
+        default_account=chain_cfg.get("default_account", "default"),
     )
 
     metadata_script = """
