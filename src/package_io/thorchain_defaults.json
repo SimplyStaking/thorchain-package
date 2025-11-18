@@ -53,7 +53,7 @@
     {
       "type": "full",
       "count": 1,
-      "image": "tiljordan/thornode-forking:1.0.20-23621657",
+      "image": "tiljordan/thornode-forking:1.0.21-23693398",
       "account_balance": 1000000000000,
       "bond_amount": 500000000000,
       "min_cpu": 1000,
@@ -67,7 +67,7 @@
   ],
   "forking": {
     "enabled": true,
-    "image": "tiljordan/thornode-forking:1.0.20-23621657",
+    "image": "tiljordan/thornode-forking:1.0.21-23693398",
     "grpc": "grpc.thor.pfc.zone:443",
     "chain_id": "thorchain-1",
     "height": 23043758,
