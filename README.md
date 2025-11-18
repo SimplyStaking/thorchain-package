@@ -236,7 +236,6 @@ chains:
       preload_keys:
         - name: alice
           mnemonic: "<24-word mnemonic for thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs>"
-      default_account: alice
 ```
 
 ### CLI Key Preloading
@@ -249,9 +248,8 @@ chains:
     preload_keys:
       - name: integration-bot
         mnemonic: "<24-word mnemonic>"
-    default_account: integration-bot
 ```
-The CLI launcher imports each mnemonic, warns if the derived address is *not* listed under `prefunded_accounts`, and (optionally) repoints the `default` key to the requested entry.
+The CLI launcher imports each mnemonic, warns if the derived address is *not* listed under `prefunded_accounts`, and automatically uses the first imported key as the CLI default.
 
 ### State Forking
 Fork from mainnet state with a minimal config (examples/forking-genesis.yaml):

@@ -1,7 +1,6 @@
-def configure_cli_keys(plan, service_name, faucet_mnemonic="", preload_keys=None, prefunded_accounts=None, default_account="default"):
+def configure_cli_keys(plan, service_name, preload_keys=None, prefunded_accounts=None):
     preload_keys = preload_keys or []
     prefunded_accounts = prefunded_accounts or {}
-    default_account = default_account or "default"
 
     script = """
 set -eu
@@ -9,11 +8,10 @@ python3 - <<'PY'
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 preload_keys = %(preload_keys)r
 prefunded_accounts = %(prefunded_accounts)r
-default_account = %(default_account)r
-faucet_mnemonic = %(faucet_mnemonic)r
 
 prefunded_amounts = {}
 if isinstance(prefunded_accounts, dict):
@@ -88,16 +86,22 @@ def ensure_default_exists():
         return addr
     return create_random_default()
 
-if faucet_mnemonic and faucet_mnemonic.strip():
-    faucet_addr = import_from_mnemonic("faucet", faucet_mnemonic, "faucet")
-    if faucet_addr and faucet_addr in prefunded_amounts:
-        log("Faucet address {} carries {} base units per denom".format(faucet_addr, prefunded_amounts[faucet_addr]))
-else:
-    log("No faucet mnemonic supplied; skipping faucet import")
+prefunded_alias_options = ["prefunded_account", "prefunded_user_account"]
+assigned_prefunded_aliases = []
 
-default_target = (default_account or "default").strip() or "default"
+def reserve_prefunded_alias():
+    for alias in prefunded_alias_options:
+        if alias not in assigned_prefunded_aliases:
+            assigned_prefunded_aliases.append(alias)
+            return alias
+    return ""
+
 preloaded_info = {}
+preload_order = []
+selected_name = ""
+selected_addr = ""
 
+# Import preload keys first (before faucet)
 for entry in preload_keys:
     if not isinstance(entry, dict):
         continue
@@ -106,46 +110,50 @@ for entry in preload_keys:
     if not isinstance(name, str) or not name:
         continue
     addr = import_from_mnemonic(name, mnemonic, name)
-    preloaded_info[name] = {"address": addr, "mnemonic": mnemonic}
+    final_name = name
+    if addr and prefunded_amounts and addr in prefunded_amounts:
+        alias = reserve_prefunded_alias()
+        if alias:
+            if alias != name:
+                log("Renaming prefunded key '{}' -> '{}'".format(name, alias))
+                run_cmd(["thornode","keys","delete",name,"--keyring-backend","test","--yes"], ignore_errors=True)
+                addr = import_from_mnemonic(alias, mnemonic, alias)
+            final_name = alias
+        else:
+            log("⚠ Prefunded key '{}' cannot reserve canonical alias; keeping original name".format(name))
+    preload_order.append(final_name)
+    preloaded_info[final_name] = {"address": addr, "mnemonic": mnemonic}
     if addr and prefunded_amounts:
         amount = prefunded_amounts.get(addr)
         if amount:
-            log("✓ Key '{}' matches prefunded account {} base units".format(name, amount))
+            log("✓ Key '{}' matches prefunded account {} base units".format(final_name, amount))
         else:
-            log("⚠ Key '{}' ({}) not found in prefunded_accounts; it will start empty".format(name, addr))
+            log("⚠ Key '{}' ({}) not found in prefunded_accounts; it will start empty".format(final_name, addr))
 
-if default_target == "default":
-    ensure_default_exists()
-elif default_target == "faucet":
-    if faucet_mnemonic and faucet_mnemonic.strip():
-        addr = import_from_mnemonic("default", faucet_mnemonic, "default (faucet)")
-        if addr:
-            log("Set 'default' key to faucet address {}".format(addr))
+if preload_order:
+    selected_name = preload_order[0]
+    selected_addr = preloaded_info.get(selected_name, {}).get("address") or fetch_address(selected_name)
+    if selected_addr:
+        log("Using preload key '{}' as CLI default ({})".format(selected_name, selected_addr))
     else:
-        log("⚠ Requested faucet as default but no faucet mnemonic available; generating random 'default' key")
-        create_random_default()
+        log("⚠ Preload key '{}' missing address; CLI keyring may be empty".format(selected_name))
 else:
-    info = preloaded_info.get(default_target)
-    if info and info.get("mnemonic"):
-        addr = import_from_mnemonic("default", info["mnemonic"], "default ({})".format(default_target))
-        if addr:
-            log("Set 'default' key to '{}' ({})".format(default_target, addr))
+    selected_name = "default"
+    selected_addr = ensure_default_exists()
+    if selected_addr:
+        log("No preload keys supplied; generated '{}' key -> {}".format(selected_name, selected_addr))
     else:
-        log("⚠ Requested default_account '{}' not found in preload_keys; leaving existing 'default' key".format(default_target))
-        if not fetch_address("default"):
-            create_random_default()
+        log("⚠ No preload keys supplied and failed to create 'default' key")
 
-final_default = fetch_address("default")
-if final_default:
-    log("'default' key ready ({})".format(final_default))
-else:
-    create_random_default()
+state_path = Path("/root/.thornode/.cli_default_account")
+try:
+    state_path.write_text(json.dumps({"name": selected_name, "address": selected_addr}, indent=2))
+except Exception as exc:
+    log("⚠ Failed to persist CLI default metadata: {}".format(exc))
 PY
 """ % {
         "preload_keys": preload_keys,
         "prefunded_accounts": prefunded_accounts,
-        "default_account": default_account,
-        "faucet_mnemonic": faucet_mnemonic or "",
     }
 
     plan.exec(
@@ -153,5 +161,5 @@ PY
         ExecRecipe(
             command=["/bin/sh", "-lc", script],
         ),
-        description="Configure CLI keyring (faucet + preload keys)",
+        description="Configure CLI keyring",
     )

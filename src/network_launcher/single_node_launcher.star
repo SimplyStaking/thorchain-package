@@ -628,31 +628,11 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
             "min_cpu": cli_cfg.get("min_cpu", 250),
             "min_memory": cli_cfg.get("min_memory", 256),
             "skip_toolchain_setup": cli_cfg.get("skip_toolchain_setup", False),
+            "preload_keys": cli_cfg.get("preload_keys", []),
+            "prefunded_accounts": chain_cfg.get("prefunded_accounts", {}),
         }
         cli_only_launcher.launch_cli_only(plan, cli_payload)
 
-        # Import faucet key into CLI container so it matches thornode defaults
-        faucet_mnemonic_res = plan.exec(
-            node_name,
-            ExecRecipe(
-                command=[
-                    "/bin/sh",
-                    "-lc",
-                    "cat /tmp/execution-data/faucet.mnemonic | tr -d '\\r'",
-                ],
-                extract={"mnemonic": "."},
-            ),
-            description="Read faucet mnemonic for CLI key import",
-        )
-        faucet_mnemonic = faucet_mnemonic_res.get("extract.mnemonic", "").strip()
-        cli_key_manager.configure_cli_keys(
-            plan,
-            cli_name,
-            faucet_mnemonic=faucet_mnemonic,
-            preload_keys=cli_cfg.get("preload_keys", []),
-            prefunded_accounts=chain_cfg.get("prefunded_accounts", {}),
-            default_account=cli_cfg.get("default_account", "default"),
-        )
         plan.print("CLI container '{}' provisioned".format(cli_name))
     else:
         plan.print("CLI container skipped (use deploy_cli: true to enable)")

@@ -8,7 +8,10 @@ DEFAULT_THORCHAIN_FILE = "./thorchain_defaults.json"
 def _is_valid_cli_key_name(name):
     if not name or type(name) != "string":
         return False
-    for ch in name:
+    # Check if name contains only alphanumeric, hyphen, or underscore
+    # Use index-based iteration since string iteration may not work in all Starlark versions
+    for i in range(len(name)):
+        ch = name[i]
         if ("a" <= ch and ch <= "z") or ("A" <= ch and ch <= "Z") or ("0" <= ch and ch <= "9"):
             continue
         if ch in ["-", "_"]:
@@ -16,7 +19,7 @@ def _is_valid_cli_key_name(name):
         return False
     return True
 
-def _validate_cli_preload_config(context, preload_keys, default_account):
+def _validate_cli_preload_config(context, preload_keys):
     if preload_keys == None:
         preload_keys = []
     if type(preload_keys) != "list":
@@ -43,19 +46,6 @@ def _validate_cli_preload_config(context, preload_keys, default_account):
         words = [w for w in mnemonic.strip().split(" ") if w]
         if len(words) < 12:
             fail("{} preload key '{}' mnemonic must contain at least 12 words".format(context, name))
-
-    allowed_defaults = ["default", "faucet"]
-    default_value = default_account if default_account else "default"
-    if type(default_value) != "string":
-        fail("{} default_account must be a string".format(context))
-    default_value = default_value or "default"
-    if default_value not in allowed_defaults and default_value not in seen_names:
-        name_list = list(seen_names.keys())
-        fail("{} default_account '{}' must be 'default', 'faucet', or one of {}".format(
-            context,
-            default_value,
-            ", ".join(name_list) if name_list else "the configured preload key names",
-        ))
 
     return seen_names.keys()
 
@@ -144,7 +134,6 @@ def apply_chain_defaults(chain, defaults):
     cli_service["skip_toolchain_setup"] = cli_service.get(
         "skip_toolchain_setup", False)
     cli_service["preload_keys"] = cli_service.get("preload_keys", [])
-    cli_service["default_account"] = cli_service.get("default_account", "default")
     chain["deploy_cli"] = chain.get("deploy_cli", defaults.get("deploy_cli", False))
 
     return chain
@@ -186,15 +175,13 @@ def validate_input_args(input_args):
                 if addr_len < 40 or addr_len > 64:
                     fail("prefunded_accounts address '{}' must be between 40 and 64 characters (got {})".format(addr, addr_len))
 
-                # Validate amount type
+                # Validate amount type and convert to int
                 value_type = type(amount)
                 if value_type != "int" and value_type != "string":
                     fail("prefunded_accounts amount for '{}' must be an integer or numeric string".format(addr))
 
-                try:
-                    amt_int = int(amount)
-                except Exception:
-                    fail("prefunded_accounts amount for '{}' must be numeric (got {})".format(addr, amount))
+                # Convert to int (will fail with clear error if string is not numeric)
+                amt_int = int(amount)
 
                 if amt_int <= 0:
                     fail("prefunded_accounts amount for '{}' must be positive (got {})".format(addr, amount))
@@ -202,15 +189,13 @@ def validate_input_args(input_args):
         config_type = chain.get("config_type", "network")
         if config_type == "cli_only":
             preload_keys = chain.get("preload_keys", [])
-            default_account = chain.get("default_account", "default")
             context = "CLI-only '{}'".format(chain["name"])
         else:
             cli_cfg = chain.get("cli_service", {})
             preload_keys = cli_cfg.get("preload_keys", [])
-            default_account = cli_cfg.get("default_account", "default")
             context = "CLI service for '{}'".format(chain["name"])
 
-        _validate_cli_preload_config(context, preload_keys, default_account)
+        _validate_cli_preload_config(context, preload_keys)
 
 def input_parser(input_args=None):
     thorchain_defaults = read_json_file(DEFAULT_THORCHAIN_FILE)
@@ -255,7 +240,6 @@ def input_parser(input_args=None):
                     "min_memory": chain.get("min_memory", cli_defaults.get("min_memory", 256)),
                     "persistent_size": chain.get("persistent_size", cli_defaults.get("persistent_size", 2048)),
                     "preload_keys": chain.get("preload_keys", []),
-                    "default_account": chain.get("default_account", "default"),
                     "prefunded_accounts": chain.get("prefunded_accounts", {}),
                 }
 

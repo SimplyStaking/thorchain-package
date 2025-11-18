@@ -42,7 +42,6 @@ chains:
         # Import Alice's mnemonic into the CLI container so it is ready to use
         - name: alice
           mnemonic: "<24-word mnemonic for thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs>"
-      default_account: alice
 
 # ==============================================================================
 # Usage Instructions
