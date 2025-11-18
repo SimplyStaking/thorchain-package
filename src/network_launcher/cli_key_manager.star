@@ -86,10 +86,19 @@ def ensure_default_exists():
         return addr
     return create_random_default()
 
-prefunded_alias_options = ["prefunded_account", "prefunded_user_account"]
+prefunded_alias_options = [
+    "user_prefunded_account",
+    "user_account",
+    "prefunded_account",
+    "prefunded_user_account",
+    "user-prefunded-account",
+]
 assigned_prefunded_aliases = []
 
-def reserve_prefunded_alias():
+def reserve_prefunded_alias(preferred=None):
+    if preferred and preferred in prefunded_alias_options and preferred not in assigned_prefunded_aliases:
+        assigned_prefunded_aliases.append(preferred)
+        return preferred
     for alias in prefunded_alias_options:
         if alias not in assigned_prefunded_aliases:
             assigned_prefunded_aliases.append(alias)
@@ -112,7 +121,7 @@ for entry in preload_keys:
     addr = import_from_mnemonic(name, mnemonic, name)
     final_name = name
     if addr and prefunded_amounts and addr in prefunded_amounts:
-        alias = reserve_prefunded_alias()
+        alias = reserve_prefunded_alias(name)
         if alias:
             if alias != name:
                 log("Renaming prefunded key '{}' -> '{}'".format(name, alias))
