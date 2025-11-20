@@ -58,6 +58,9 @@ def apply_chain_defaults(chain, defaults):
     chain["chain_contracts"] = chain.get("chain_contracts", defaults["chain_contracts"])
     chain["app_version"] = chain.get("app_version", defaults["app_version"])
     chain["reserve_amount"] = chain.get("reserve_amount", defaults["reserve_amount"])
+    chain["node_persistent_size_mb"] = chain.get(
+        "node_persistent_size_mb", defaults.get("node_persistent_size_mb", 16384)
+    )
 
     # Nested defaults
     chain["denom"] = chain.get("denom", {})
