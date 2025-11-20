@@ -1,0 +1,68 @@
+# Example: THORChain with Prefunded Accounts
+# This configuration demonstrates how to pre-fund specific addresses in genesis
+
+chains:
+  - name: thorchain
+    type: thorchain
+
+    # Standard forking configuration
+    forking:
+      enabled: true
+      grpc: "grpc.thor.pfc.zone:443"
+      chain_id: "thorchain-1"
+      height: 23043758
+      cache_enabled: true
+      cache_size: 10000
+      timeout: "60s"
+      gas_cost_per_fetch: 0
+
+    # Prefunded Accounts Feature
+    # Each account receives ALL ~500 mainnet denominations at the specified amount
+    # Amounts are in base units (8 decimals: 100000000 = 1 RUNE)
+    prefunded_accounts:
+      # Alice: 1M RUNE + all other denoms
+      thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs: 1000000000000000
+
+      # Bob: 500K RUNE + all other denoms
+      thor1e0lmk5juawc46jwjwd0xfz587njej7ay5fh6cd: 500000000000000
+
+      # Charlie: 2M RUNE + all other denoms
+      thor1z63f3mzwv3g75az80xwmhrawdqcjpaekk0kd54: 2000000000000000
+
+    # Enable CosmWasm permissionless uploads
+    mimir:
+      enabled: true
+      values:
+        WASMPERMISSIONLESS: 1
+
+    # Deploy CLI service for easy access
+    deploy_cli: true
+    cli_service:
+      preload_keys:
+        # Import Alice's mnemonic into the CLI container so it is ready to use
+        - name: alice
+          mnemonic: "<24-word mnemonic for thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs>"
+
+# ==============================================================================
+# Usage Instructions
+# ==============================================================================
+#
+# 1. Generate thor1 addresses externally:
+#    $ thornode keys add alice --keyring-backend test --output json
+#
+# 2. Update prefunded_accounts above with your addresses
+#
+# 3. Launch network:
+#    $ kurtosis run github.com/0xBloctopus/thorchain-package \
+#        --args-file examples/prefunded-accounts.yaml
+#
+# 4. Verify balances:
+#    $ kurtosis service shell thorchain thorchain-node
+#    $ thornode query bank balances thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs
+#
+# Notes:
+# - Each account gets all ~500 mainnet denoms (BTC, ETH, USDC, etc.)
+# - Addresses must be valid thor1 bech32 (44 chars)
+# - Prefunding is independent from CLI key import. Only provide mnemonics if you
+#   want the CLI utility containers to preload them for convenience.
+# - Perfect for testing without faucet requests

@@ -19,6 +19,7 @@ def _build_env(chain_cfg):
 
 
 toolchain = import_module("./toolchain.star")
+cli_key_manager = import_module("./cli_key_manager.star")
 
 def launch_cli_only(plan, chain_cfg):
     network_name = chain_cfg.get("name", "thorchain-cli")
@@ -59,18 +60,11 @@ def launch_cli_only(plan, chain_cfg):
         description="Initialize thornode home for CLI operations",
     )
 
-    ensure_default_key = """
-set -eu
-thornode keys show default --keyring-backend test --output json >/tmp/default-key.json 2>/dev/null || \
-thornode keys add default --keyring-backend test --output json >/tmp/default-key.json
-"""
-
-    plan.exec(
+    cli_key_manager.configure_cli_keys(
+        plan,
         service_name,
-        ExecRecipe(
-            command=["/bin/sh", "-lc", ensure_default_key],
-        ),
-        description="Ensure default CLI key exists",
+        preload_keys=chain_cfg.get("preload_keys", []),
+        prefunded_accounts=chain_cfg.get("prefunded_accounts", {}),
     )
 
     metadata_script = """
@@ -79,25 +73,49 @@ import json
 import subprocess
 from pathlib import Path
 
-def read_key():
-    for name in ("faucet", "default"):
-        try:
-            proc = subprocess.run(
-                ["thornode", "keys", "show", name, "--keyring-backend", "test", "--output", "json"],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError:
-            continue
-        try:
-            data = json.loads(proc.stdout or "{}")
-        except Exception:
-            data = {}
-        if isinstance(data, dict):
-            data["name"] = name
-            return data
+STATE_PATH = Path("/root/.thornode/.cli_default_account")
+
+def read_key(name):
+    if not name:
+        return {}
+    try:
+        proc = subprocess.run(
+            ["thornode", "keys", "show", name, "--keyring-backend", "test", "--output", "json"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except subprocess.CalledProcessError:
+        return {}
+    try:
+        data = json.loads(proc.stdout or "{}")
+    except Exception:
+        data = {}
+    if isinstance(data, dict):
+        data["name"] = name
+        return data
     return {}
+
+def resolve_default():
+    default_name = ""
+    default_info = {}
+    if STATE_PATH.exists():
+        try:
+            state = json.loads(STATE_PATH.read_text() or "{}")
+        except Exception:
+            state = {}
+        default_name = state.get("name") or ""
+        stored_addr = state.get("address") or ""
+        if default_name:
+            info = read_key(default_name)
+            if info:
+                return default_name, info
+            if stored_addr:
+                return default_name, {"name": default_name, "address": stored_addr}
+    fallback = read_key("default")
+    if fallback:
+        return fallback.get("name", "default"), fallback
+    return default_name, default_info
 
 data = {
     "profile": %(profile)r,
@@ -107,8 +125,10 @@ data = {
     "rpc_url": %(rpc)r,
     "api_url": %(api)r,
     "faucet_url": %(faucet)r,
-    "default_key": read_key(),
 }
+default_name, default_key = resolve_default()
+data["default_account"] = default_name
+data["default_key"] = default_key
 Path("/root/.thornode/cli_context.json").write_text(json.dumps(data, indent=2))
 PY
 """ % {

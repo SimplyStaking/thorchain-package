@@ -8,6 +8,7 @@
   "chain_contracts": [],
   "genesis_delay": 5,
   "deploy_cli": false,
+  "node_persistent_size_mb": 9216,
   "denom": {
     "name": "rune",
     "display": "rune",
@@ -22,6 +23,7 @@
     "faucet_amount": 1000000000000000,
     "transfer_amount": 10000000000000
   },
+  "prefunded_accounts": {},
   "consensus": {
     "block_max_bytes": 22020096,
     "block_max_gas": -1,

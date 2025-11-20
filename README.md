@@ -207,7 +207,7 @@ After deployment, services are accessible at:
 
 ### Prefunded Accounts
 
-Fund accounts at genesis time using either THORChain addresses or mnemonics. The package automatically converts mnemonics to addresses using the THORChain derivation path. See [README_PREFUNDED_ACCOUNTS.md](README_PREFUNDED_ACCOUNTS.md) for detailed documentation including TypeScript and Go integration examples.
+Fund accounts at genesis time by listing THORChain addresses under `prefunded_accounts`. No private keys are required or stored; addresses simply appear in genesis with the requested balance for every denom. If you also deploy CLI containers, you can optionally preload mnemonics via `cli_service.preload_keys` so the CLI keyring has convenient access to those funded accounts while keeping prefunding and key management decoupled. See [README_PREFUNDED_ACCOUNTS.md](README_PREFUNDED_ACCOUNTS.md) for a deeper dive.
 
 ### State Forking
 
@@ -222,15 +222,34 @@ kurtosis run --enclave thorchain-testnet github.com/0xBloctopus/thorchain-packag
 ```
 
 ### Prefunded Accounts
-Fund specific accounts at genesis time ([example_prefunded.yaml](example_prefunded.yaml)):
+Fund specific accounts at genesis time ([examples/prefunded-accounts.yaml](examples/prefunded-accounts.yaml)):
 ```yaml
 chains:
-  - name: "thorchain-test"
-    type: "thorchain"
+  - name: thorchain
+    type: thorchain
     prefunded_accounts:
-      "thor1abc123def456ghi789jkl012mno345pqr678stu": "1000000000000"  # Direct address
-      "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about": "2000000000000"  # Mnemonic
+      # Each account receives ALL ~500 mainnet denoms at the specified amount
+      thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs: 1000000000000000  # 1M RUNE + all denoms
+      thor1e0lmk5juawc46jwjwd0xfz587njej7ay5fh6cd: 500000000000000   # 500K RUNE + all denoms
+    deploy_cli: true
+    cli_service:
+      preload_keys:
+        - name: alice
+          mnemonic: "<24-word mnemonic for thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs>"
 ```
+
+### CLI Key Preloading
+Supply mnemonics exclusively to the CLI toolchain so they are ready for transactions without exposing keys to the network launcher:
+```yaml
+chains:
+  - config_type: cli_only
+    name: thorchain-cli
+    rpc_url: "https://thornode.ninerealms.com:443"
+    preload_keys:
+      - name: integration-bot
+        mnemonic: "<24-word mnemonic>"
+```
+The CLI launcher imports each mnemonic, warns if the derived address is *not* listed under `prefunded_accounts`, and automatically uses the first imported key as the CLI default.
 
 ### State Forking
 Fork from mainnet state with a minimal config (examples/forking-genesis.yaml):

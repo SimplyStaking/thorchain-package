@@ -5,6 +5,50 @@ def read_json_file(file_path):
 # Paths to the default JSON files
 DEFAULT_THORCHAIN_FILE = "./thorchain_defaults.json"
 
+def _is_valid_cli_key_name(name):
+    if not name or type(name) != "string":
+        return False
+    # Check if name contains only alphanumeric, hyphen, or underscore
+    # Use index-based iteration since string iteration may not work in all Starlark versions
+    for i in range(len(name)):
+        ch = name[i]
+        if ("a" <= ch and ch <= "z") or ("A" <= ch and ch <= "Z") or ("0" <= ch and ch <= "9"):
+            continue
+        if ch in ["-", "_"]:
+            continue
+        return False
+    return True
+
+def _validate_cli_preload_config(context, preload_keys):
+    if preload_keys == None:
+        preload_keys = []
+    if type(preload_keys) != "list":
+        fail("{} preload_keys must be a list".format(context))
+
+    seen_names = {}
+    for idx, entry in enumerate(preload_keys):
+        if type(entry) != "dict":
+            fail("{} preload_keys entry at index {} must be a dictionary".format(context, idx))
+
+        name = entry.get("name")
+        mnemonic = entry.get("mnemonic")
+
+        if type(name) != "string" or not name:
+            fail("{} preload key entry {} must include a non-empty 'name'".format(context, idx))
+        if not _is_valid_cli_key_name(name):
+            fail("{} preload key name '{}' must use alphanumeric, '-' or '_' characters".format(context, name))
+        if name in seen_names:
+            fail("{} preload key name '{}' is duplicated".format(context, name))
+        seen_names[name] = True
+
+        if type(mnemonic) != "string" or not mnemonic.strip():
+            fail("{} preload key '{}' must include a mnemonic string".format(context, name))
+        words = [w for w in mnemonic.strip().split(" ") if w]
+        if len(words) < 12:
+            fail("{} preload key '{}' mnemonic must contain at least 12 words".format(context, name))
+
+    return seen_names.keys()
+
 def apply_chain_defaults(chain, defaults):
     # Simple key-value defaults
     chain["name"] = chain.get("name", defaults["name"])
@@ -14,6 +58,9 @@ def apply_chain_defaults(chain, defaults):
     chain["chain_contracts"] = chain.get("chain_contracts", defaults["chain_contracts"])
     chain["app_version"] = chain.get("app_version", defaults["app_version"])
     chain["reserve_amount"] = chain.get("reserve_amount", defaults["reserve_amount"])
+    chain["node_persistent_size_mb"] = chain.get(
+        "node_persistent_size_mb", defaults.get("node_persistent_size_mb", 9216)
+    )
 
     # Nested defaults
     chain["denom"] = chain.get("denom", {})
@@ -89,6 +136,7 @@ def apply_chain_defaults(chain, defaults):
         "min_memory", cli_defaults.get("min_memory", 128))
     cli_service["skip_toolchain_setup"] = cli_service.get(
         "skip_toolchain_setup", False)
+    cli_service["preload_keys"] = cli_service.get("preload_keys", [])
     chain["deploy_cli"] = chain.get("deploy_cli", defaults.get("deploy_cli", False))
 
     return chain
@@ -106,6 +154,51 @@ def validate_input_args(input_args):
         if chain["type"] != "thorchain":
             fail("Unsupported chain type: "+ chain["type"])
         chain_names.append(chain["name"])
+
+        # Validate prefunded_accounts if present
+        if "prefunded_accounts" in chain:
+            prefunded = chain["prefunded_accounts"]
+
+            # Must be a dict
+            if type(prefunded) != "dict":
+                fail("prefunded_accounts must be a dictionary mapping addresses to amounts")
+
+            # Validate each entry
+            for addr in prefunded:
+                amount = prefunded[addr]
+
+                # Validate address format
+                if type(addr) != "string":
+                    fail("prefunded_accounts keys must be strings (thor1... addresses)")
+
+                if not addr.startswith("thor1"):
+                    fail("prefunded_accounts address '{}' must start with 'thor1'".format(addr))
+
+                addr_len = len(addr)
+                if addr_len < 40 or addr_len > 64:
+                    fail("prefunded_accounts address '{}' must be between 40 and 64 characters (got {})".format(addr, addr_len))
+
+                # Validate amount type and convert to int
+                value_type = type(amount)
+                if value_type != "int" and value_type != "string":
+                    fail("prefunded_accounts amount for '{}' must be an integer or numeric string".format(addr))
+
+                # Convert to int (will fail with clear error if string is not numeric)
+                amt_int = int(amount)
+
+                if amt_int <= 0:
+                    fail("prefunded_accounts amount for '{}' must be positive (got {})".format(addr, amount))
+
+        config_type = chain.get("config_type", "network")
+        if config_type == "cli_only":
+            preload_keys = chain.get("preload_keys", [])
+            context = "CLI-only '{}'".format(chain["name"])
+        else:
+            cli_cfg = chain.get("cli_service", {})
+            preload_keys = cli_cfg.get("preload_keys", [])
+            context = "CLI service for '{}'".format(chain["name"])
+
+        _validate_cli_preload_config(context, preload_keys)
 
 def input_parser(input_args=None):
     thorchain_defaults = read_json_file(DEFAULT_THORCHAIN_FILE)
@@ -149,6 +242,8 @@ def input_parser(input_args=None):
                     "min_cpu": chain.get("min_cpu", cli_defaults.get("min_cpu", 250)),
                     "min_memory": chain.get("min_memory", cli_defaults.get("min_memory", 256)),
                     "persistent_size": chain.get("persistent_size", cli_defaults.get("persistent_size", 2048)),
+                    "preload_keys": chain.get("preload_keys", []),
+                    "prefunded_accounts": chain.get("prefunded_accounts", {}),
                 }
 
                 result["chains"].append(cli_chain)

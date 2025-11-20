@@ -25,7 +25,7 @@ sed -i 's/^minimum-gas-prices = ".*"/minimum-gas-prices = "0rune"/' $CONFIG_FOLD
 sed -i 's/^enable = false/enable = true/' $CONFIG_FOLDER/app.toml
 sed -i 's/^swagger = false/swagger = true/' $CONFIG_FOLDER/app.toml
 sed -i 's/^pruning = "default"/pruning = "custom"/' $CONFIG_FOLDER/app.toml
-sed -i 's/^pruning-keep-recent = "0"/pruning-keep-recent = "200"/' $CONFIG_FOLDER/app.toml
+sed -i 's/^pruning-keep-recent = "0"/pruning-keep-recent = "64"/' $CONFIG_FOLDER/app.toml
 sed -i 's/^pruning-keep-every = "0"/pruning-keep-every = "0"/' $CONFIG_FOLDER/app.toml
 sed -i 's/^pruning-interval = "0"/pruning-interval = "20"/' $CONFIG_FOLDER/app.toml
 sed -i 's/^snapshot-interval = [0-9][0-9]*/snapshot-interval = 0/' $CONFIG_FOLDER/app.toml
