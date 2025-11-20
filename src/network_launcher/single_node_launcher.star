@@ -12,6 +12,7 @@ def launch_single_node(plan, chain_cfg):
     forking_image = forking_config.get("image", "tiljordan/thornode-forking:1.0.21-23693398")
 
     participant = chain_cfg["participants"][0]
+    node_volume_size = participant.get("persistent_size_mb", chain_cfg.get("node_persistent_size_mb", 16384))
     account_balance = int(participant["account_balance"])
     bond_amount = int(participant.get("bond_amount", "500000000000"))
     faucet_amount = int(chain_cfg["faucet"]["faucet_amount"])
@@ -86,7 +87,7 @@ def launch_single_node(plan, chain_cfg):
                 "/merge_patch": merge_artifact,
                 "/tmp/execution-data": Directory(
                     persistent_key="node-data",
-                    size=5000
+                    size=node_volume_size,
                 )
             },
         ),
@@ -535,7 +536,7 @@ sed -i 's/^minimum-gas-prices = ".*"/minimum-gas-prices = "0rune"/' "$APP"
 sed -i 's/^enable = false/enable = true/' "$APP"
 sed -i 's/^swagger = false/swagger = true/' "$APP"
 sed -i 's/^pruning = "default"/pruning = "custom"/' "$APP"
-sed -i 's/^pruning-keep-recent = "0"/pruning-keep-recent = "200"/' "$APP"
+sed -i 's/^pruning-keep-recent = "0"/pruning-keep-recent = "64"/' "$APP"
 sed -i 's/^pruning-keep-every = "0"/pruning-keep-every = "0"/' "$APP"
 sed -i 's/^pruning-interval = "0"/pruning-interval = "20"/' "$APP"
 sed -i 's/^snapshot-interval = [0-9][0-9]*/snapshot-interval = 0/' "$APP"
