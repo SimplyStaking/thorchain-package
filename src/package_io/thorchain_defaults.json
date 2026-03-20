@@ -8,6 +8,9 @@
   "chain_contracts": [],
   "genesis_delay": 5,
   "deploy_cli": false,
+  "bifrost_enabled": false,
+  "bitcoin_enabled": true,
+  "ethereum_enabled": true,
   "node_persistent_size_mb": 9216,
   "denom": {
     "name": "rune",

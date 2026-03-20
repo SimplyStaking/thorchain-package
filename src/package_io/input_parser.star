@@ -117,6 +117,11 @@ def apply_chain_defaults(chain, defaults):
         else:
             chain["mimir"][key] = chain["mimir"].get(key, value)
 
+    # Apply defaults for Bifrost + external chains
+    chain["bifrost_enabled"] = chain.get("bifrost_enabled", defaults.get("bifrost_enabled", False))
+    chain["bitcoin_enabled"] = chain.get("bitcoin_enabled", defaults.get("bitcoin_enabled", True))
+    chain["ethereum_enabled"] = chain.get("ethereum_enabled", defaults.get("ethereum_enabled", True))
+
     # Apply defaults for the companion CLI service consumed by MCP tooling.
     cli_defaults = defaults.get("cli_defaults", {})
     chain_name = chain.get("name", defaults.get("name", "thorchain"))

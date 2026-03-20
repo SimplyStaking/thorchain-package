@@ -1,0 +1,22 @@
+chains:
+  - name: thorchain
+    type: thorchain
+    chain_id: "thorchain-localnet"
+    app_version: "3.11.0"
+    bifrost_enabled: true
+    bitcoin_enabled: true
+    ethereum_enabled: true
+    forking:
+      enabled: true
+      image: "tiljordan/thornode-forking:1.0.25-23761879"
+      height: 23015000
+    participants:
+      - image: "tiljordan/thornode-forking:1.0.25-23761879"
+        count: 1
+        account_balance: 1000000000000
+        bond_amount: 500000000000
+    faucet:
+      faucet_amount: 1000000000000000
+      transfer_amount: 10000000000000
+    additional_services:
+      - faucet

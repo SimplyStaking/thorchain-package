@@ -203,6 +203,79 @@ After deployment, services are accessible at:
 ### Swap UI
 - **Interface**: `http://<swap-ui-ip>:80` - Web trading interface
 
+## Bifrost + Cross-Chain Swaps
+
+The package can optionally deploy Bifrost (THORChain's cross-chain bridge signer) along with external chain nodes for real cross-chain swap testing.
+
+### Enabling Bifrost
+
+Set `bifrost_enabled: true` in your chain configuration:
+
+```yaml
+chains:
+  - name: thorchain
+    type: thorchain
+    bifrost_enabled: true      # Launch Bifrost + external chains
+    bitcoin_enabled: true      # Bitcoin regtest (default: true when bifrost enabled)
+    ethereum_enabled: true     # Ethereum via Anvil (default: true when bifrost enabled)
+```
+
+### What Gets Deployed
+
+When Bifrost is enabled, the package launches (in order):
+
+1. **Bitcoin regtest** (`lncm/bitcoind:v26.0`) — RPC on port 18443, with a wallet and 101 pre-mined blocks
+2. **Ethereum Anvil** (`ghcr.io/foundry-rs/foundry`) — RPC on port 8545, 10 prefunded accounts with 1000 ETH each
+3. **Bifrost** (`registry.gitlab.com/thorchain/thornode:mocknet`) — connected to THORNode + both chain nodes
+
+The launcher waits for Bifrost to register its chains with THORNode (visible at `/thorchain/inbound_addresses`).
+
+### Disabling Individual Chains
+
+You can disable specific chains while keeping Bifrost:
+
+```yaml
+chains:
+  - name: thorchain
+    bifrost_enabled: true
+    bitcoin_enabled: true
+    ethereum_enabled: false    # Skip Ethereum
+```
+
+### Quote-Only Mode (Fast)
+
+For tests that only need THORChain's quote endpoints (no actual swaps), keep `bifrost_enabled: false` (the default). This skips all external chain nodes and Bifrost, giving you a much faster startup:
+
+```yaml
+chains:
+  - name: thorchain
+    type: thorchain
+    # bifrost_enabled: false   # default — no Bifrost, no external chains
+```
+
+### Service Endpoints (Bifrost Mode)
+
+| Service | Port | Description |
+|---------|------|-------------|
+| Bitcoin RPC | 18443 | `bitcoin-cli -regtest -rpcuser=thorchain -rpcpassword=thorchain` |
+| Bitcoin P2P | 18444 | Peer-to-peer (regtest) |
+| Ethereum RPC | 8545 | Standard JSON-RPC (Anvil) |
+| Bifrost P2P | 5040 | Bifrost peer-to-peer |
+| Bifrost RPC | 6040 | Bifrost RPC |
+
+### Supported Chains
+
+| Chain | Image | Status |
+|-------|-------|--------|
+| Bitcoin | `lncm/bitcoind:v26.0` | ✅ Regtest with wallet + pre-mined blocks |
+| Ethereum | `ghcr.io/foundry-rs/foundry:latest` | ✅ Anvil with prefunded accounts |
+
+### Known Limitations
+
+- Bifrost env var names and startup scripts are based on the THORChain localnet convention and may need adjustment for different THORNode image versions. Check the `TODO` comments in `src/bifrost/bifrost_launcher.star`.
+- The Bifrost image uses `registry.gitlab.com/thorchain/thornode:mocknet` — ensure this tag exists or update to match your THORNode version.
+- Cross-chain swap end-to-end tests require additional setup (vault funding, chain client configuration) beyond what this launcher provides out of the box.
+
 ## Advanced Features
 
 ### Prefunded Accounts
@@ -314,6 +387,17 @@ chains:
     api_url: https://api.example.com
 ```
 
+
+### Cross-Chain Swap Testing (Bifrost)
+Deploy with Bifrost + Bitcoin + Ethereum for real cross-chain swap testing:
+```yaml
+chains:
+  - name: thorchain
+    type: thorchain
+    bifrost_enabled: true
+    additional_services:
+      - faucet
+```
 
 ### Contract Development Workflow
 

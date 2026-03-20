@@ -5,6 +5,9 @@ faucet = import_module("./src/faucet/faucet_launcher.star")
 bdjuno = import_module("./src/bdjuno/bdjuno_launcher.star")
 swap_ui = import_module("./src/swap-ui/swap_ui_launcher.star")
 mimir_configurator = import_module("./src/mimir-config/mimir_configurator.star")
+bitcoin_launcher = import_module("./src/bitcoin/bitcoin_launcher.star")
+ethereum_launcher = import_module("./src/ethereum/ethereum_launcher.star")
+bifrost_launcher = import_module("./src/bifrost/bifrost_launcher.star")
 
 def run(plan, args):
     parsed_args = input_parser.input_parser(args)
@@ -97,5 +100,31 @@ def run(plan, args):
         
         # Configure MIMIR values
         #mimir_configurator.configure_mimir_values(plan, chain, [node_info])
-        
+
+        # Launch Bifrost + external chain nodes if enabled
+        bifrost_enabled = chain.get("bifrost_enabled", False)
+        if bifrost_enabled:
+            bitcoin_info = None
+            ethereum_info = None
+
+            bitcoin_enabled = chain.get("bitcoin_enabled", True)
+            ethereum_enabled = chain.get("ethereum_enabled", True)
+
+            if bitcoin_enabled:
+                plan.print("Launching Bitcoin regtest node...")
+                bitcoin_info = bitcoin_launcher.launch_bitcoin(plan)
+
+            if ethereum_enabled:
+                plan.print("Launching Ethereum (Anvil) node...")
+                ethereum_info = ethereum_launcher.launch_ethereum(plan)
+
+            plan.print("Launching Bifrost signer...")
+            bifrost_info = bifrost_launcher.launch_bifrost(
+                plan,
+                node_name,
+                bitcoin_info,
+                ethereum_info,
+            )
+            plan.print("✓ Bifrost deployment complete!")
+
         plan.print("✓ {} deployment complete!".format(chain_name))
