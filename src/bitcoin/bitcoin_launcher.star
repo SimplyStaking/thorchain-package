@@ -41,6 +41,7 @@ def launch_bitcoin(plan):
                 "-fallbackfee=0.0002",
                 "-server=1",
                 "-listen=1",
+                "-deprecatedrpc=create_bdb",
             ],
             min_cpu=250,
             min_memory=512,
@@ -72,7 +73,7 @@ def launch_bitcoin(plan):
             command=[
                 "/bin/sh",
                 "-c",
-                """bitcoin-cli -regtest -rpcuser=thorchain -rpcpassword=thorchain createwallet "thorchain" false false "" false false true && \
+                """bitcoin-cli -regtest -rpcuser=thorchain -rpcpassword=thorchain createwallet "thorchain" false false "" false false && \
 bitcoin-cli -regtest -rpcuser=thorchain -rpcpassword=thorchain -generate 101""",
             ],
         ),
