@@ -4,17 +4,18 @@ Bifrost signer launcher for THORChain cross-chain testing.
 Launches the Bifrost process from the THORChain Docker image, configured
 to connect to the local THORNode and external chain nodes (Bitcoin, Ethereum).
 
-TODO: The exact env var names and startup script need verification against
-a running THORChain localnet (gitlab.com/thorchain/thornode build/docker).
-The names used here are based on the THORChain localnet docker-compose
-convention and may need adjustment.
+The mocknet image ships with /scripts/bifrost.sh which:
+  1. Sources /scripts/core.sh (validates SIGNER_NAME, SIGNER_PASSWD)
+  2. Waits for THORChain API via /scripts/wait-for-thorchain-api.sh
+  3. Creates the signer key via create_thor_user()
+  4. Execs into the CMD (bifrost binary)
 """
 
 # Default seed phrase for the Bifrost signer in localnet mode.
-# This is the standard THORChain localnet seed — NOT for production use.
+# This is the standard THORChain localnet seed -- NOT for production use.
 LOCALNET_SEED_PHRASE = "dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog dog fossil"
 
-def launch_bifrost(plan, thornode_service_name, bitcoin_info, ethereum_info):
+def launch_bifrost(plan, thornode_service_name, bitcoin_info, ethereum_info, validator_mnemonic=""):
     """Launch a Bifrost signer connected to THORNode and external chains.
 
     Args:
@@ -24,6 +25,8 @@ def launch_bifrost(plan, thornode_service_name, bitcoin_info, ethereum_info):
             None if Bitcoin is disabled.
         ethereum_info: dict from ethereum_launcher (name, rpc_url).
             None if Ethereum is disabled.
+        validator_mnemonic: The validator's mnemonic phrase. Bifrost must sign as the
+            validator so that THORNode recognizes it as a whitelisted node account.
 
     Returns:
         dict with keys:
@@ -32,98 +35,116 @@ def launch_bifrost(plan, thornode_service_name, bitcoin_info, ethereum_info):
     """
     service_name = "bifrost"
 
-    thornode_rpc = "http://{}:26657".format(thornode_service_name)
-    thornode_api = "http://{}:1317".format(thornode_service_name)
+    # Both use bare host:port. The Go code handles protocol prefixes internally.
+    thornode_rpc = "{}:26657".format(thornode_service_name)
+    thornode_api = "{}:1317".format(thornode_service_name)
 
-    # Build environment variables
-    # TODO: Verify these env var names against thorchain/thornode localnet scripts.
-    # The naming convention follows BIFROST_<SECTION>_<KEY> from the Bifrost
-    # config TOML, translated to env vars by Viper (dots → underscores, uppercased).
+    # Use the validator mnemonic so Bifrost derives the same address that is
+    # registered in genesis node_accounts.  Fall back to the default localnet seed.
+    signer_seed = validator_mnemonic if validator_mnemonic else LOCALNET_SEED_PHRASE
+
+    # Environment variables expected by /scripts/core.sh and /scripts/bifrost.sh.
+    # SIGNER_NAME + SIGNER_PASSWD are required by core.sh (validated on startup).
+    # The bifrost.sh script calls create_thor_user(SIGNER_NAME, SIGNER_PASSWD, SIGNER_SEED_PHRASE)
+    # which imports the key into the thornode keyring (file backend).
     env_vars = {
-        # THORNode connection
+        # THORNode connection -- set both the legacy env vars AND the full Viper keys
         "CHAIN_API": thornode_api,
         "CHAIN_RPC": thornode_rpc,
-        "BIFROST_THORCHAIN_CHAIN_HOST": thornode_rpc,
+        "BIFROST_THORCHAIN_CHAIN_HOST": thornode_api,
         "BIFROST_THORCHAIN_CHAIN_RPC": thornode_rpc,
+        "BIFROST_SIGNER_BLOCK_SCANNER_RPC_HOST": thornode_rpc,
 
-        # Signer config
-        "SIGNER_SEED_PHRASE": LOCALNET_SEED_PHRASE,
+        # eBifrost attestation gRPC -- in v3.x, observations are submitted via
+        # the eBifrost gRPC service running inside thornode (port 50051), not via
+        # legacy MsgObservedTxIn broadcasts. Point Bifrost at thornode's gRPC.
+        "BIFROST_THORCHAIN_CHAIN_EBIFROST": "{}:50051".format(thornode_service_name),
+
+        # Signer identity -- SIGNER_NAME is required by core.sh
+        "SIGNER_NAME": "thorchain",
         "SIGNER_PASSWD": "password",
-        "BIFROST_SIGNER_SEED_PHRASE": LOCALNET_SEED_PHRASE,
-        "BIFROST_SIGNER_PASSWD": "password",
+        "SIGNER_SEED_PHRASE": signer_seed,
 
         # General
         "NET": "mocknet",
         "CHAIN_ID": "thorchain-localnet",
+
+        # Override Bifrost signer keygen/keysign timeouts to be shorter than
+        # the JailTimeKeygen/JailTimeKeysign constants (10 blocks = 10s in mocknet).
+        # Without this, Bifrost fatals: "keygen timeout must be shorter than jail time".
+        # Viper key: bifrost.signer.keygen_timeout -> env: BIFROST_SIGNER_KEYGEN_TIMEOUT
+        "BIFROST_SIGNER_KEYGEN_TIMEOUT": "8s",
+        "BIFROST_SIGNER_KEYSIGN_TIMEOUT": "8s",
+
+        # The signer's THORChain block scanner needs to start near the current chain
+        # height so it can immediately process outbound transactions. Setting 0 tells
+        # GetStartHeight() to use the latest observed height from /thorchain/lastblock.
+        # This works because we seed last_chain_heights in genesis.
+        # Viper path: bifrost.signer.block_scanner.start_block_height
+        "BIFROST_SIGNER_BLOCK_SCANNER_START_BLOCK_HEIGHT": "0",
+
+        # Disable all chains we are NOT running. The default config enables all chains
+        # and Bifrost fatals if it can't find an RPC host for any enabled chain.
+        "GAIA_DISABLED": "true",
+        "DOGE_DISABLED": "true",
+        "LTC_DISABLED": "true",
+        "AVAX_DISABLED": "true",
+        "BIFROST_CHAINS_BCH_DISABLED": "true",
+        "BIFROST_CHAINS_BSC_DISABLED": "true",
+        "BIFROST_CHAINS_BASE_DISABLED": "true",
+        "BIFROST_CHAINS_TRON_DISABLED": "true",
+        "BIFROST_CHAINS_XRP_DISABLED": "true",
+        "BIFROST_CHAINS_SOL_DISABLED": "true",
+        "BIFROST_CHAINS_POL_DISABLED": "true",
+        "BIFROST_CHAINS_ZEC_DISABLED": "true",
+        "BIFROST_CHAINS_NOBLE_DISABLED": "true",
+        "BIFROST_CHAINS_SUI_DISABLED": "true",
+        "BIFROST_CHAINS_ADA_DISABLED": "true",
     }
 
     # Bitcoin chain client config
     if bitcoin_info:
-        env_vars["BIFROST_CHAINS_BTC_RPC_HOST"] = bitcoin_info["rpc_url"]
-        env_vars["BIFROST_CHAINS_BTC_RPC_USER"] = bitcoin_info["rpc_user"]
-        env_vars["BIFROST_CHAINS_BTC_RPC_PASS"] = bitcoin_info["rpc_pass"]
-        env_vars["BTC_HOST"] = bitcoin_info["rpc_url"]
+        # Append /wallet/thorchain to the RPC URL so the Bitcoin RPC routes
+        # to the named wallet (required by Bitcoin Core v26+ multi-wallet).
+        btc_wallet_url = bitcoin_info["rpc_url"] + "/wallet/thorchain"
+        env_vars["BTC_HOST"] = btc_wallet_url
+        env_vars["BIFROST_CHAINS_BTC_RPC_HOST"] = btc_wallet_url
+        env_vars["BIFROST_CHAINS_BTC_USERNAME"] = bitcoin_info["rpc_user"]
+        env_vars["BIFROST_CHAINS_BTC_PASSWORD"] = bitcoin_info["rpc_pass"]
+        env_vars["BIFROST_CHAINS_BTC_HTTP_POST_MODE"] = "1"
+        env_vars["BIFROST_CHAINS_BTC_DISABLE_TLS"] = "1"
+    else:
+        env_vars["BIFROST_CHAINS_BTC_DISABLED"] = "true"
 
     # Ethereum chain client config
     if ethereum_info:
         env_vars["BIFROST_CHAINS_ETH_RPC_HOST"] = ethereum_info["rpc_url"]
         env_vars["ETH_HOST"] = ethereum_info["rpc_url"]
+    else:
+        env_vars["BIFROST_CHAINS_ETH_DISABLED"] = "true"
 
     ports = {
         "p2p": PortSpec(number=5040, transport_protocol="TCP", wait=None),
         "rpc": PortSpec(number=6040, transport_protocol="TCP", wait=None),
     }
 
-    # The THORChain Docker image includes bifrost binary and startup scripts.
-    # We attempt to use the standard localnet entry script; if it doesn't exist,
-    # fall back to running the bifrost binary directly.
-    # TODO: Confirm the correct entrypoint script path from the THORChain image.
-    entrypoint_script = """
-set -e
-echo "Starting Bifrost signer..."
-echo "THORNode RPC: $CHAIN_RPC"
-echo "THORNode API: $CHAIN_API"
-
-# Wait for THORNode to be responsive
-echo "Waiting for THORNode..."
-i=0
-while [ $i -lt 120 ]; do
-  if wget -qO- "$CHAIN_API/thorchain/ping" 2>/dev/null | grep -q ping; then
-    echo "THORNode is ready"
-    break
-  fi
-  sleep 2
-  i=$((i+2))
-done
-
-if [ $i -ge 120 ]; then
-  echo "WARNING: THORNode not responding after 120s, starting Bifrost anyway"
-fi
-
-# Try the standard localnet script first, fall back to direct binary
-if [ -f /docker/scripts/bifrost.sh ]; then
-  exec /docker/scripts/bifrost.sh
-elif [ -f /scripts/bifrost.sh ]; then
-  exec /scripts/bifrost.sh
-else
-  echo "No startup script found, running bifrost binary directly"
-  exec bifrost
-fi
-"""
-
+    # Use the image's own /scripts/bifrost.sh as entrypoint.
+    # It sources core.sh, waits for the THORChain API, creates the signer key,
+    # then execs into the CMD we pass (the bifrost binary).
     service = plan.add_service(
         name=service_name,
         config=ServiceConfig(
             image="registry.gitlab.com/thorchain/thornode:mocknet",
             ports=ports,
-            entrypoint=["/bin/sh", "-c", entrypoint_script],
+            entrypoint=["/scripts/bifrost.sh"],
+            cmd=["bifrost", "-p"],
             env_vars=env_vars,
             min_cpu=500,
             min_memory=1024,
         ),
     )
 
-    plan.print("✓ Bifrost signer launched")
+    plan.print("Bifrost signer launched")
 
     # Wait for Bifrost to register chains with THORNode by polling inbound_addresses.
     # This endpoint returns the list of chains Bifrost has registered as available.
@@ -145,7 +166,7 @@ fi
 CHAINS_NEEDED="%s"
 echo "Waiting for Bifrost to register chains: $CHAINS_NEEDED"
 i=0
-while [ $i -lt 300 ]; do
+while [ $i -lt 60 ]; do
   response=$(curl -sSf http://localhost:1317/thorchain/inbound_addresses 2>/dev/null || echo "")
   if [ -n "$response" ]; then
     all_found=true
@@ -163,7 +184,7 @@ while [ $i -lt 300 ]; do
   sleep 3
   i=$((i+3))
 done
-echo "WARNING: Not all chains registered after 300s. Check Bifrost logs."
+echo "WARNING: Not all chains registered after 60s. Check Bifrost logs."
 echo "This may be expected if Bifrost needs additional configuration."
 exit 0""" % chain_check_str,
                 ],
