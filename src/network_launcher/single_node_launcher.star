@@ -9,9 +9,17 @@ def launch_single_node(plan, chain_cfg):
     config_folder = "/root/.thornode/config"
 
     forking_config = chain_cfg.get("forking", {})
-    forking_image = forking_config.get("image", "tiljordan/thornode-forking:1.0.25-23761879")
+    forking_enabled = forking_config.get("enabled", True)
 
     participant = chain_cfg["participants"][0]
+
+    # Use the participant image when forking is disabled; forking image when enabled.
+    # Only reference the forking image when actually needed so Kurtosis does not
+    # attempt to pull it during validation in non-forking runs.
+    if forking_enabled:
+        node_image = forking_config.get("image", "tiljordan/thornode-forking:1.0.25-23761879")
+    else:
+        node_image = participant.get("image", "registry.gitlab.com/thorchain/thornode:mainnet")
     node_volume_size = participant.get("persistent_size_mb", chain_cfg.get("node_persistent_size_mb", 16384))
     account_balance = int(participant["account_balance"])
     bond_amount = int(participant.get("bond_amount", "500000000000"))
@@ -19,6 +27,11 @@ def launch_single_node(plan, chain_cfg):
     gomemlimit = participant.get("gomemlimit", "6GiB")
 
     app_version = chain_cfg["app_version"]
+
+    # Determine which external chains are enabled (used in genesis vault seeding)
+    bifrost_enabled = chain_cfg.get("bifrost_enabled", False)
+    bitcoin_enabled = chain_cfg.get("bitcoin_enabled", False) if bifrost_enabled else False
+    ethereum_enabled = chain_cfg.get("ethereum_enabled", False) if bifrost_enabled else False
 
     # Calculate genesis time
     genesis_delay = chain_cfg.get("genesis_delay", 5)
@@ -58,7 +71,10 @@ def launch_single_node(plan, chain_cfg):
         },
         "validator": {"pub_key_types": consensus.get("validator_pub_key_types", ["ed25519"])},
     }
-    bond_module_addr = "thor17gw75axcnr8747pkanye45pnrwk7p9c3uhzgff"
+    # Bond module address prefix depends on the image (mainnet=thor1, mocknet=tthor1).
+    # We detect this at runtime from the generated validator address.
+    # Placeholder here; actual value set after validator key generation.
+    bond_module_addr = None
 
     # Ports
     ports = {
@@ -67,6 +83,7 @@ def launch_single_node(plan, chain_cfg):
         "grpc": PortSpec(number=9090, transport_protocol="TCP", wait=None),
         "api": PortSpec(number=1317, transport_protocol="TCP", wait=None),
         "prometheus": PortSpec(number=26660, transport_protocol="TCP", wait=None),
+        "ebifrost": PortSpec(number=50051, transport_protocol="TCP", wait=None),
     }
 
     # Upload merge script to be mounted at service creation
@@ -78,7 +95,7 @@ def launch_single_node(plan, chain_cfg):
     base_service = plan.add_service(
         name="base-service",
         config=ServiceConfig(
-            image=forking_image,
+            image=node_image,
             ports=ports,
             entrypoint=["/bin/sh", "-lc", "sleep infinity"],
             min_cpu=participant.get("min_cpu", 500),
@@ -105,6 +122,32 @@ def launch_single_node(plan, chain_cfg):
     validator_addr = res["extract.validator_addr"].replace("\n", "")
     validator_mnemonic = res["extract.validator_mnemonic"].replace("\n", "")
 
+    # Also import the validator key into the file-based keyring.
+    # THORNode's keysign endpoint uses the file keyring by default, so the
+    # validator key must be present there for outbound transaction signing.
+    # The recover command reads: mnemonic, then password, then password again.
+    plan.exec(
+        "base-service",
+        ExecRecipe(
+            command=[
+                "/bin/sh",
+                "-lc",
+                "(echo '{mnemonic}'; echo 'TestPassword!'; echo 'TestPassword!') | {bin} keys add thorchain --recover --keyring-backend file 2>&1 || true".format(
+                    bin=binary,
+                    mnemonic=validator_mnemonic,
+                ),
+            ]
+        ),
+        description="Import validator key into file-based keyring for keysign",
+    )
+
+    # Derive bond module address prefix from the validator address prefix.
+    # mainnet uses "thor1", mocknet uses "tthor1". The module address suffix is fixed.
+    if validator_addr.startswith("tthor1"):
+        bond_module_addr = "tthor17gw75axcnr8747pkanye45pnrwk7p9c3uhzgff"
+    else:
+        bond_module_addr = "thor17gw75axcnr8747pkanye45pnrwk7p9c3uhzgff"
+
     # b) Init node
     plan.exec(
         "base-service",
@@ -120,12 +163,13 @@ def launch_single_node(plan, chain_cfg):
         description="Initialize thornode home and config",
     )
 
-    # c) Stage forked genesis (single copy)
-    plan.exec(
-        "base-service",
-        ExecRecipe(command=["/bin/sh", "-lc", "cp /tmp/genesis.json {}/genesis.json".format(config_folder)]),
-        description="Copy forked genesis into config",
-    )
+    # c) Stage forked genesis (only when forking from mainnet)
+    if forking_enabled:
+        plan.exec(
+            "base-service",
+            ExecRecipe(command=["/bin/sh", "-lc", "cp /tmp/genesis.json {}/genesis.json".format(config_folder)]),
+            description="Copy forked genesis into config",
+        )
 
 
     # d) Get SECP bech32 pk
@@ -226,7 +270,7 @@ node_accounts = [{
   "bond_address": validator_addr,
   "node_address": validator_addr,
   "pub_key_set": {"ed25519": ed_pk, "secp256k1": secp_pk},
-  "signer_membership": [],
+  "signer_membership": [secp_pk],
   "status": "Active",
   "validator_cons_pub_key": cons_pk,
   "version": app_version,
@@ -285,13 +329,15 @@ PY
     )
 
     # Build faucet balances and supply updates for all denoms
-    plan.exec(
-        "base-service",
-        ExecRecipe(
-            command=[
-                "/bin/sh",
-                "-lc",
-                """
+    if forking_enabled:
+        # Forking mode: fetch all mainnet denoms and create balances for each
+        plan.exec(
+            "base-service",
+            ExecRecipe(
+                command=[
+                    "/bin/sh",
+                    "-lc",
+                    """
 set -e
 curl -sS "https://thornode.ninerealms.com/cosmos/bank/v1beta1/supply?pagination.limit=500" -o /tmp/supply.json
 python3 - << 'PY'
@@ -360,20 +406,80 @@ for entry in supply_list:
 Path("/tmp/supply_fragment.json").write_text(json.dumps(updated, separators=(",",":")))
 PY
 """ % {"faucet_addr": faucet_addr, "faucet_amount": faucet_amount, "prefunded_list": prefunded_list},
-            ],
-        ),
-        description="Prepare faucet and prefunded account multi-denom balances and updated supply from ninerealms",
-    )
+                ],
+            ),
+            description="Prepare faucet and prefunded account multi-denom balances and updated supply from ninerealms",
+        )
+    else:
+        # Non-forking mode: only use RUNE denom, no mainnet supply fetch needed
+        plan.exec(
+            "base-service",
+            ExecRecipe(
+                command=[
+                    "/bin/sh",
+                    "-lc",
+                    """
+python3 - << 'PY'
+import json
+from pathlib import Path
+faucet_addr = %(faucet_addr)r
+faucet_amount = %(faucet_amount)d
+prefunded_list = %(prefunded_list)r
+# In non-forking mode, we only have 'rune' denom
+denoms = ["rune"]
+# Build faucet balance
+coins = [{"amount": str(faucet_amount), "denom": d} for d in denoms]
+faucet_balance = {"address": faucet_addr, "coins": coins}
+Path("/tmp/faucet_balances_fragment.json").write_text(json.dumps(faucet_balance, separators=(",",":")))
+# Build merged balances from existing fragment
+arr = []
+try:
+    existing = Path("/tmp/balances_fragment.json").read_text().strip()
+    if existing:
+        try:
+            arr = json.loads(f"[{existing}]")
+        except Exception:
+            j = json.loads(existing)
+            arr = j if isinstance(j, list) else [j]
+except Exception:
+    arr = []
+arr = [b for b in arr if not (isinstance(b, dict) and b.get("address")==faucet_balance["address"])]
+arr.append(faucet_balance)
+# Add prefunded accounts
+for pf in prefunded_list:
+    pf_coins = [{"amount": str(pf["amount"]), "denom": d} for d in denoms]
+    pf_balance = {"address": pf["address"], "coins": pf_coins}
+    arr = [b for b in arr if not (isinstance(b, dict) and b.get("address")==pf_balance["address"])]
+    arr.append(pf_balance)
+Path("/tmp/merged_balances_fragment.json").write_text(", ".join(json.dumps(x, separators=(",",":")) for x in arr))
+# Compute supply
+from collections import defaultdict
+tot = defaultdict(int)
+for b in arr:
+    if isinstance(b, dict):
+        for c in (b.get("coins") or []):
+            try: tot[str(c["denom"])] += int(str(c["amount"]))
+            except: pass
+supply_arr = [{"denom": d, "amount": str(tot[d])} for d in sorted(tot)]
+Path("/tmp/supply_fragment.json").write_text(json.dumps(supply_arr, separators=(",",":")))
+PY
+""" % {"faucet_addr": faucet_addr, "faucet_amount": faucet_amount, "prefunded_list": prefunded_list},
+                ],
+            ),
+            description="Prepare faucet balances and supply (non-forking, RUNE only)",
+        )
 
 
-    # h) Single-pass placeholder replacements in genesis via sed
-    plan.exec(
-        "base-service",
-        ExecRecipe(
-            command=[
-                "/bin/sh",
-                "-lc",
-                """
+    # h) Patch genesis with accounts, balances, node_accounts, and supply
+    if forking_enabled:
+        # Forking mode: sed-based placeholder replacement in the forked genesis
+        plan.exec(
+            "base-service",
+            ExecRecipe(
+                command=[
+                    "/bin/sh",
+                    "-lc",
+                    """
 set -e
 CFG=%(cfg)s/genesis.json
 
@@ -508,17 +614,255 @@ with open(p,"w") as f:
 PY
 
 """ % {
-                    "cfg": config_folder,
-                    "genesis_time": genesis_time,
-                    "chain_id": chain_id,
-                    "app_version": app_version,
-                    "faucet_addr": faucet_addr,
-                    "faucet_amount": faucet_amount,
-                },
-            ]
-        ),
-        description="Apply placeholders via single sed pass",
-    )
+                        "cfg": config_folder,
+                        "genesis_time": genesis_time,
+                        "chain_id": chain_id,
+                        "app_version": app_version,
+                        "faucet_addr": faucet_addr,
+                        "faucet_amount": faucet_amount,
+                    },
+                ]
+            ),
+            description="Apply placeholders via single sed pass (forking mode)",
+        )
+    else:
+        # Non-forking mode: directly patch the standard thornode init genesis via Python
+        plan.exec(
+            "base-service",
+            ExecRecipe(
+                command=[
+                    "/bin/sh",
+                    "-lc",
+                    """
+set -e
+python3 - << 'PY'
+import json
+from collections import defaultdict
+from pathlib import Path
+
+genesis_path = "%(cfg)s/genesis.json"
+genesis_time = %(genesis_time)r
+chain_id = %(chain_id)r
+app_version = %(app_version)r
+bond_module_addr = %(bond_module_addr)r
+bitcoin_enabled = %(bitcoin_enabled)s
+ethereum_enabled = %(ethereum_enabled)s
+
+# Load pre-computed fragments
+node_accounts = json.loads(Path("/tmp/node_accounts.json").read_text())
+consensus_block = json.loads(Path("/tmp/consensus_block.json").read_text())
+vault_membership = json.loads(Path("/tmp/vault_membership.json").read_text())
+
+# Load balances
+def parse_fragment(path):
+    txt = Path(path).read_text().strip()
+    if not txt:
+        return []
+    try:
+        return json.loads(f"[{txt}]")
+    except Exception:
+        j = json.loads(txt)
+        return j if isinstance(j, list) else [j]
+
+balances = parse_fragment("/tmp/merged_balances_fragment.json")
+accounts_list = parse_fragment("/tmp/accounts_fragment.json")
+supply = json.loads(Path("/tmp/supply_fragment.json").read_text())
+rune_supply = Path("/tmp/rune_supply.txt").read_text().strip()
+
+# Load existing genesis
+with open(genesis_path, "r") as f:
+    g = json.load(f)
+
+# Patch top-level fields
+g["genesis_time"] = genesis_time
+g["chain_id"] = chain_id
+
+# Ensure app_state exists
+app = g.setdefault("app_state", {})
+
+# Patch consensus params
+if "consensus" not in g:
+    g["consensus"] = {}
+g["consensus"]["params"] = consensus_block
+
+# Patch auth accounts
+auth = app.setdefault("auth", {})
+existing_accounts = auth.get("accounts", [])
+for acc in accounts_list:
+    # Skip if already exists
+    addr = acc.get("address", "")
+    if not any(a.get("address") == addr for a in existing_accounts):
+        existing_accounts.append(acc)
+auth["accounts"] = existing_accounts
+
+# Patch bank balances and supply
+bank = app.setdefault("bank", {})
+bank["balances"] = balances
+# Recompute supply from actual balances
+tot = defaultdict(int)
+for b in balances:
+    if isinstance(b, dict):
+        for c in (b.get("coins") or []):
+            try:
+                tot[str(c["denom"])] += int(str(c["amount"]))
+            except Exception:
+                pass
+bank["supply"] = [{"denom": d, "amount": str(tot[d])} for d in sorted(tot)]
+
+# Patch thorchain module
+tc = app.setdefault("thorchain", {})
+tc["node_accounts"] = node_accounts
+tc["reserve"] = rune_supply
+tc["vaults"] = tc.get("vaults", [])
+
+# Build the list of external chains enabled for Bifrost
+vault_chains = ["THOR"]
+if bitcoin_enabled:
+    vault_chains.append("BTC")
+if ethereum_enabled:
+    vault_chains.append("ETH")
+
+# Build router list for the vault (Bifrost reads routers from vault pubkeys)
+vault_routers = []
+if ethereum_enabled:
+    vault_routers.append({"chain": "ETH", "router": "0x5FbDB2315678afecb367f032d93F642f64180aa3"})
+
+# Ensure a single vault with membership and chains
+if not tc["vaults"]:
+    tc["vaults"] = [{
+        "block_height": "0",
+        "pub_key": vault_membership[0] if vault_membership else "",
+        "coins": [],
+        "type": "AsgardVault",
+        "status": "ActiveVault",
+        "membership": vault_membership,
+        "chains": vault_chains,
+        "inbound_tx_count": "0",
+        "routers": vault_routers,
+    }]
+else:
+    for v in tc["vaults"]:
+        v["membership"] = vault_membership
+        v["chains"] = vault_chains
+        v["routers"] = vault_routers
+
+# Set node IP address so Bifrost can register with THORNode.
+# In a Kurtosis enclave, services resolve by name; the node's own
+# container address is fine. We use a placeholder that works inside
+# the Docker network.
+for na in tc["node_accounts"]:
+    if not na.get("ip_address"):
+        na["ip_address"] = "bifrost"
+
+# Seed last_chain_heights so /thorchain/lastblock returns data from block 1.
+# Without this, Bifrost subsystems (solvency, IsChainPaused, signer scanner)
+# keep erroring because GetBlockHeight() returns empty when there are no
+# observed chain heights.
+last_chain_heights = []
+if bitcoin_enabled:
+    last_chain_heights.append({"chain": "BTC", "height": "1"})
+if ethereum_enabled:
+    last_chain_heights.append({"chain": "ETH", "height": "1"})
+tc["last_chain_heights"] = last_chain_heights
+
+# Seed last_signed_height so the lastblock query includes the thorchain field.
+# NOTE: Amino JSON codec requires int64/uint64 values to be quoted strings.
+tc["last_signed_height"] = "1"
+
+# Register chain contracts (router addresses) required by Bifrost for EVM chains.
+# The ETH router is deployed deterministically at nonce 0 from Anvil account 0.
+# Without a registered router, Bifrost cannot execute outbound ETH/ERC-20 transfers.
+chain_contracts = tc.get("chain_contracts", [])
+if ethereum_enabled:
+    eth_router = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+    if not any(c.get("chain") == "ETH" for c in chain_contracts):
+        chain_contracts.append({"chain": "ETH", "router": eth_router})
+tc["chain_contracts"] = chain_contracts
+
+# Seed network fees so the outbound transaction pipeline can price gas.
+# Without valid network fees, GetGasDetails() fails in prepareTxOutItem(),
+# which prevents TryAddTxOutItem() from scheduling ANY L1 outbound —
+# swaps execute (pool balances change) but the outbound is never created.
+# Bifrost will later overwrite these with observed values.
+# Values: BTC = 250 vbytes @ 25 sat/vbyte, ETH = 80000 gas @ 30 gwei.
+network_fees = tc.get("network_fees", [])
+if bitcoin_enabled:
+    if not any(nf.get("chain") == "BTC" for nf in network_fees):
+        network_fees.append({
+            "chain": "BTC",
+            "transaction_size": "250",
+            "transaction_fee_rate": "25",
+        })
+if ethereum_enabled:
+    if not any(nf.get("chain") == "ETH" for nf in network_fees):
+        network_fees.append({
+            "chain": "ETH",
+            "transaction_size": "80000",
+            "transaction_fee_rate": "30",
+        })
+tc["network_fees"] = network_fees
+
+# Patch denom metadata if missing
+denom_meta = bank.get("denom_metadata", [])
+if not any(m.get("base") == "rune" for m in denom_meta):
+    denom_meta.append({
+        "description": "RUNE coin",
+        "denom_units": [
+            {"denom": "rune", "exponent": 0, "aliases": []},
+            {"denom": "RUNE", "exponent": 8, "aliases": []},
+        ],
+        "base": "rune",
+        "display": "rune",
+        "name": "rune",
+        "symbol": "RUNE",
+    })
+bank["denom_metadata"] = denom_meta
+
+# Set minimum gas prices in genesis (bank send_enabled)
+bank["send_enabled"] = bank.get("send_enabled", [])
+
+# Set MIMIR values required for Bifrost operation.
+# JailTimeKeygen must be > KeygenTimeout (default 5m = 300 blocks at 1s/block).
+# Without these, Bifrost fatals with "keygen timeout must be shorter than jail time".
+mimirs = tc.get("mimirs", [])
+mimir_defaults = {
+    "JailTimeKeygen": 720,      # 12 minutes in blocks (> 5m keygen timeout)
+    "JailTimeKeysign": 60,      # 1 minute in blocks
+    "WASMPERMISSIONLESS": 1,    # allow permissionless WASM deployment
+}
+# EVM chains: enable the router allowance check so Bifrost auto-approves
+# ERC-20 token transfers. Without this, the V6 router's transferOut()
+# reverts because the vault hasn't approved the router to spend tokens.
+# The key format is "EVMAllowanceCheck-{CHAIN}" where CHAIN = ETH, AVAX, etc.
+if ethereum_enabled:
+    mimir_defaults["EVMAllowanceCheck-ETH"] = 1
+existing_keys = {m.get("key", ""): i for i, m in enumerate(mimirs)}
+for key, val in mimir_defaults.items():
+    if key in existing_keys:
+        mimirs[existing_keys[key]]["value"] = str(val)
+    else:
+        mimirs.append({"key": key, "value": str(val)})
+tc["mimirs"] = mimirs
+
+# Write patched genesis
+with open(genesis_path, "w") as f:
+    json.dump(g, f, separators=(",", ":"))
+
+print("Genesis patched successfully (non-forking mode)")
+PY
+""" % {
+                        "cfg": config_folder,
+                        "genesis_time": genesis_time,
+                        "chain_id": chain_id,
+                        "app_version": app_version,
+                        "bond_module_addr": bond_module_addr,
+                        "bitcoin_enabled": "True" if bitcoin_enabled else "False",
+                        "ethereum_enabled": "True" if ethereum_enabled else "False",
+                    },
+                ]
+            ),
+            description="Patch genesis with accounts, balances, and node_accounts (non-forking mode)",
+        )
 
 
     # j) Batch config updates
@@ -560,6 +904,10 @@ sed -i 's/^enabled-unsafe-cors = false/enabled-unsafe-cors = true/' "$APP"
 
 sed -i 's/^prometheus = false/prometheus = true/' "$CFG"
 sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:26660"/' "$CFG"
+
+# Bind eBifrost gRPC to all interfaces so Bifrost (running in a separate container)
+# can connect and submit attestation-based observations.
+sed -i 's/^address = "localhost:50051"/address = "0.0.0.0:50051"/' "$APP"
 """ % {"cfg": config_folder},
             ]
         ),
@@ -586,12 +934,12 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
     node_service = plan.add_service(
         name=node_name,
         config=ServiceConfig(
-            image=forking_image,
+            image=node_image,
             ports=ports,
             entrypoint=[
                 "/bin/sh",
                 "-lc",
-                "set -e; THOR_HOME=/tmp/execution-data/.thornode; if [ ! -d \"$THOR_HOME\" ]; then echo 'missing thornode home in persistent volume' >&2; exit 1; fi; ln -sfn \"$THOR_HOME\" /root/.thornode; export GOMEMLIMIT='{gomemlimit}'; printf 'validator\\nTestPassword!\\n' | {bin} start --home \"$THOR_HOME\"".format(
+                "set -e; THOR_HOME=/tmp/execution-data/.thornode; if [ ! -d \"$THOR_HOME\" ]; then echo 'missing thornode home in persistent volume' >&2; exit 1; fi; ln -sfn \"$THOR_HOME\" /root/.thornode; export GOMEMLIMIT='{gomemlimit}'; printf 'thorchain\\nTestPassword!\\n' | {bin} start --home \"$THOR_HOME\"".format(
                     bin=binary,
                     gomemlimit=gomemlimit,
                 )
@@ -642,4 +990,5 @@ sed -i 's/^prometheus_listen_addr = ":26660"/prometheus_listen_addr = "0.0.0.0:2
         "name": node_name,
         "ip": node_service.ip_address,
         "cli_service": cli_name,
+        "validator_mnemonic": validator_mnemonic,
     }
