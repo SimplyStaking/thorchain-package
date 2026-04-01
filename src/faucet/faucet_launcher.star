@@ -1,4 +1,4 @@
-def launch_faucet(plan, chain_name, chain_id, mnemonic, transfer_amount):
+def launch_faucet(plan, chain_name, chain_id, mnemonic, transfer_amount, node_image=""):
     # Get first node
     first_node = plan.get_service(
         name = "{}-node".format(chain_name)
@@ -29,8 +29,8 @@ def launch_faucet(plan, chain_name, chain_id, mnemonic, transfer_amount):
         name="{}-faucet-server".format(chain_name)
     )
 
-    # Use thornode forking image to get thornode CLI in container
-    faucet_image = "tiljordan/thornode-forking:1.0.25-23761879"
+    # Use the same image as the node (needs thornode CLI); fall back to mainnet image
+    faucet_image = node_image if node_image else "registry.gitlab.com/thorchain/thornode:mainnet"
 
     # Launch the faucet service
     plan.add_service(
