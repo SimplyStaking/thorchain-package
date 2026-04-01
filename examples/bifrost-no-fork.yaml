@@ -1,0 +1,35 @@
+## Local swap testing: fresh chain + Bifrost + Bitcoin + Ethereum
+## No mainnet forking -- fast startup, zero real fees.
+##
+## Deploy with:
+##   kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.yaml
+##
+## Cleanup:
+##   kurtosis enclave rm thorchain-testnet
+##
+## Note: resource limits are set low (2 GB per service) to fit on machines
+## with 8 GB Docker allocation. Increase min_memory if your machine has more RAM.
+
+chains:
+  - name: thorchain
+    type: thorchain
+    chain_id: "thorchain-localnet"
+    app_version: "3.11.0"
+    bifrost_enabled: true
+    bitcoin_enabled: true
+    ethereum_enabled: true
+    forking:
+      enabled: false
+    participants:
+      - image: "registry.gitlab.com/thorchain/thornode:mocknet"
+        count: 1
+        account_balance: 1000000000000000
+        bond_amount: 300000000000000
+        min_cpu: 500
+        min_memory: 2048
+        gomemlimit: "1GiB"
+    faucet:
+      faucet_amount: 1000000000000000
+      transfer_amount: 10000000000000
+    additional_services:
+      - faucet

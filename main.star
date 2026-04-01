@@ -32,6 +32,14 @@ def run(plan, args):
         if participant_count != 1:
             fail("This package only supports single-node networks. Found {} participants.".format(participant_count))
         
+        # Determine the node image (needed by faucet and other services)
+        forking_cfg = chain.get("forking", {})
+        forking_enabled = forking_cfg.get("enabled", True)
+        if forking_enabled:
+            node_image = forking_cfg.get("image", "tiljordan/thornode-forking:1.0.25-23761879")
+        else:
+            node_image = chain["participants"][0].get("image", "registry.gitlab.com/thorchain/thornode:mainnet")
+
         plan.print("Launching single-node network for {}".format(chain_name))
         
         # Launch the node
@@ -90,7 +98,7 @@ def run(plan, args):
                         description="Read faucet mnemonic from node",
                     )
                     faucet_mnemonic = faucet_mnemonic_res["extract.mnemonic"]
-                    faucet.launch_faucet(plan, chain_name, chain_id, faucet_mnemonic, chain["faucet"]["transfer_amount"])
+                    faucet.launch_faucet(plan, chain_name, chain_id, faucet_mnemonic, chain["faucet"]["transfer_amount"], node_image=node_image)
                 elif service == "bdjuno":
                     service_launchers[service](plan, chain_name, chain)
                 elif service == "swap-ui":
@@ -119,11 +127,13 @@ def run(plan, args):
                 ethereum_info = ethereum_launcher.launch_ethereum(plan)
 
             plan.print("Launching Bifrost signer...")
+            validator_mnemonic = node_info.get("validator_mnemonic", "")
             bifrost_info = bifrost_launcher.launch_bifrost(
                 plan,
                 node_name,
                 bitcoin_info,
                 ethereum_info,
+                validator_mnemonic=validator_mnemonic,
             )
             plan.print("✓ Bifrost deployment complete!")
 
