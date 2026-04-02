@@ -89,3 +89,10 @@ dump/
 network.yaml
 genesis_file/
 current_genesis/
+
+# OpenCode
+.opencode/
+
+# Foundry (forge/cast)
+cache/
+out/
