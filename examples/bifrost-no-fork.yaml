@@ -33,3 +33,4 @@ chains:
       transfer_amount: 10000000000000
     additional_services:
       - faucet
+      - midgard

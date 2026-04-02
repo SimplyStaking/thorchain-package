@@ -4,6 +4,7 @@ cli_only_launcher = import_module("./src/network_launcher/cli_only_launcher.star
 faucet = import_module("./src/faucet/faucet_launcher.star")
 bdjuno = import_module("./src/bdjuno/bdjuno_launcher.star")
 swap_ui = import_module("./src/swap-ui/swap_ui_launcher.star")
+midgard = import_module("./src/midgard/midgard_launcher.star")
 mimir_configurator = import_module("./src/mimir-config/mimir_configurator.star")
 bitcoin_launcher = import_module("./src/bitcoin/bitcoin_launcher.star")
 ethereum_launcher = import_module("./src/ethereum/ethereum_launcher.star")
@@ -81,7 +82,8 @@ def run(plan, args):
         service_launchers = {
             "faucet": faucet.launch_faucet,
             "bdjuno": bdjuno.launch_bdjuno,
-            "swap-ui": swap_ui.launch_swap_ui
+            "swap-ui": swap_ui.launch_swap_ui,
+            "midgard": midgard.launch_midgard,
         }
         
         for service in additional_services:
@@ -105,6 +107,8 @@ def run(plan, args):
                     forking_config = chain.get("forking", {})
                     prefunded_mnemonics = []
                     service_launchers[service](plan, chain_name, chain_id, forking_config, prefunded_mnemonics)
+                elif service == "midgard":
+                    midgard.launch_midgard(plan, chain_name)
         
         # Configure MIMIR values
         #mimir_configurator.configure_mimir_values(plan, chain, [node_info])
