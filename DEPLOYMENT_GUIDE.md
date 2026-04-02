@@ -52,7 +52,7 @@ This pulls several Docker images on first run (may take a few minutes).
 
 | Config File | Use Case | Startup Time | Services |
 |---|---|---|---|
-| `examples/bifrost-no-fork.yaml` | Local swap testing | ~2-5 min | THORNode, Faucet, Bitcoin, Ethereum, Bifrost |
+| `examples/bifrost-no-fork.yaml` | Local swap testing | ~2-5 min | THORNode, Faucet, Midgard, Bitcoin, Ethereum, Bifrost |
 | `examples/forking-disabled.yaml` | Simple THORNode only | ~1-2 min | THORNode only |
 | `examples/bifrost-enabled.yaml` | Cross-chain with mainnet state | ~10-20 min | THORNode (forked), Faucet, Bitcoin, Ethereum, Bifrost |
 | `examples/forking-enabled.yaml` | Mainnet fork + CLI + MIMIR | ~10-20 min | THORNode (forked), Faucet, CLI |
@@ -77,10 +77,12 @@ kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.
 
 | Service | Image | Ports | Description |
 |---|---|---|---|
-| `thorchain-node` | `thorchain/thornode:mocknet` | RPC:26657, API:1317, gRPC:9090, P2P:26656, Metrics:26660 | THORChain validator node |
+| `thorchain-node` | `thorchain/thornode:mocknet` | RPC:26657, API:1317, gRPC:9090, eBifrost:50051 | THORChain validator node |
 | `thorchain-faucet` | `thorchain/thornode:mocknet` | HTTP:8090 | Token faucet (free RUNE) |
+| `thorchain-midgard` | `thorchain/midgard:2.34.1` | HTTP:8080 | Block indexer (swap status, pool history) |
+| `thorchain-midgard-db` | `timescaledb:2.13.0-pg15` | Postgres:5432 | Midgard's backing database |
 | `bitcoin` | `lncm/bitcoind:v26.0` | RPC:18443, P2P:18444 | Bitcoin regtest node |
-| `ethereum` | `foundry-rs/foundry:latest` | RPC:8545 | Ethereum Anvil node |
+| `ethereum` | `foundry-rs/foundry:latest` | RPC:8545 | Ethereum Anvil node (+ router contract) |
 | `bifrost` | `thorchain/thornode:mocknet` | P2P:5040, RPC:6040 | Cross-chain bridge signer |
 
 ### Accessing Services
@@ -159,6 +161,83 @@ curl -s -X POST -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}' \
   http://127.0.0.1:<ETH_RPC_PORT>
 ```
+
+### Bootstrap Pools
+
+After deployment, the chain is running but has no liquidity pools. To enable cross-chain swaps, bootstrap pools with the provided script:
+
+```bash
+# Requires: cast (foundry), curl, python3
+./scripts/bootstrap-pools.sh
+```
+
+This takes ~3 minutes and:
+1. Creates a pool creator account and funds it with RUNE
+2. Deploys a USDC ERC-20 token at the Bifrost-whitelisted address
+3. Bootstraps three pools with dual-sided liquidity:
+
+| Pool | Asset Side | RUNE Side | Rate |
+|------|-----------|-----------|------|
+| BTC.BTC | 10 BTC | 100k RUNE | 1 BTC = 10,000 RUNE |
+| ETH.ETH | 100 ETH | 100k RUNE | 1 ETH = 1,000 RUNE |
+| ETH.USDC | 100k USDC | 100k RUNE | 1 USDC = 1 RUNE |
+
+Cross-pool rates (via RUNE): 1 BTC = 10 ETH = 100,000 USDC.
+
+After bootstrapping, you can verify pools are active:
+```bash
+curl -s http://127.0.0.1:<API_PORT>/thorchain/pools | python3 -m json.tool
+```
+
+The script also prints all service URLs at the end.
+
+> **Note:** If you specify a custom enclave name, pass it as the first argument:
+> `./scripts/bootstrap-pools.sh my-enclave`
+
+### Full Deploy + Bootstrap (One-Liner)
+
+```bash
+kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.yaml \
+  && ./scripts/bootstrap-pools.sh
+```
+
+### Midgard (Swap Status API)
+
+Midgard indexes THORChain blocks and provides the `/v2/actions` API used by aggregators to track swap status. It's included by default in `bifrost-no-fork.yaml`.
+
+```bash
+# Check Midgard health
+curl -s http://127.0.0.1:<MIDGARD_PORT>/v2/health | jq .
+
+# Query swap status by inbound txid
+curl -s "http://127.0.0.1:<MIDGARD_PORT>/v2/actions?txid=<TX_HASH>" | jq .
+
+# List recent swaps
+curl -s "http://127.0.0.1:<MIDGARD_PORT>/v2/actions?type=swap&limit=10" | jq .
+
+# Pool depths and history
+curl -s http://127.0.0.1:<MIDGARD_PORT>/v2/pools | jq .
+```
+
+Midgard typically catches up within seconds of deployment. Check `inSync: true` in the health response to confirm.
+
+### Connecting an Aggregator (e.g., Pegasus)
+
+Point your aggregator at the mocknet with these environment variables:
+
+```bash
+PEGASUS_THORCHAIN_NODE_URL=http://localhost:<API_PORT>
+PEGASUS_THORCHAIN_MIDGARD_URL=http://localhost:<MIDGARD_PORT>
+PEGASUS_DISABLE_PROVIDERS=maya,openocean
+```
+
+Get the actual ports from `kurtosis enclave inspect thorchain-testnet` or from the bootstrap script's output.
+
+The aggregator can then:
+- Query `/thorchain/quote/swap` for quotes
+- Read `/thorchain/inbound_addresses` for vault addresses and router contracts
+- Track swap status via Midgard `/v2/actions?txid=...`
+- Discover pools via `/thorchain/pools`
 
 ---
 
