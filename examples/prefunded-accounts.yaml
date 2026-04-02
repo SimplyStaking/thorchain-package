@@ -53,7 +53,7 @@ chains:
 # 2. Update prefunded_accounts above with your addresses
 #
 # 3. Launch network:
-#    $ kurtosis run github.com/0xBloctopus/thorchain-package \
+#    $ kurtosis run github.com/SimplyStaking/thorchain-mocknet \
 #        --args-file examples/prefunded-accounts.yaml
 #
 # 4. Verify balances:

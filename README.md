@@ -1,6 +1,6 @@
-# THORChain Package
+# THORChain Mocknet
 
-A Kurtosis package for deploying private THORChain testnets with automated genesis generation, network launching, and auxiliary services.
+A Kurtosis package for deploying private THORChain mocknets with automated genesis generation, network launching, and auxiliary services.
 
 ## Overview
 
@@ -27,29 +27,41 @@ This package automates the deployment of complete THORChain networks through a c
 
 ## Quick Start
 
-### Basic Deployment
+### Local Swap Testing (Recommended)
 
-Deploy a default THORChain network:
+Deploy a THORChain mocknet with Bifrost, Bitcoin, and Ethereum for cross-chain swap testing:
 
 ```bash
-kurtosis run --enclave thorchain-testnet github.com/0xBloctopus/thorchain-package
+kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.yaml
 ```
+
+After deployment, bootstrap liquidity pools and run swaps:
+
+```bash
+./scripts/bootstrap-pools.sh
+```
+
+See [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) for full walkthrough and [DEPLOYMENT_MANUAL.md](DEPLOYMENT_MANUAL.md) for pool bootstrapping, swap mechanics, and ERC-20 token deployment.
 
 ### Custom Configuration
 
 Create a configuration file and deploy:
 
 ```bash
-kurtosis run --enclave thor-fork . --args-file examples/forking-genesis.yaml
+kurtosis run --enclave thorchain-testnet . --args-file your-config.yaml
 ```
 
 Example minimal configuration:
 
 ```yaml
 chains:
-  - name: "my-thorchain"
-    type: "thorchain"
-    chain_id: "thorchain-testnet"
+  - name: thorchain
+    type: thorchain
+    forking:
+      enabled: false
+    participants:
+      - image: "registry.gitlab.com/thorchain/thornode:mocknet"
+        count: 1
 ```
 
 ## Configuration
@@ -62,12 +74,14 @@ The package uses a comprehensive configuration system with defaults from `thorch
 |-----------|-------------|---------|
 | `name` | Chain identifier for services | `"thorchain"` |
 | `type` | Must be `"thorchain"` | `"thorchain"` |
-| `chain_id` | Blockchain network ID | `"thorchain"` |
-| `app_version` | THORChain application version | `"3.7.0"` |
+| `chain_id` | Blockchain network ID | `"thorchain-localnet"` |
+| `app_version` | THORChain application version | `"3.11.0"` |
 | `participants` | Validator node configuration | 1 validator |
 | `additional_services` | Services to deploy | `["faucet", "bdjuno"]` |
 | `prefunded_accounts` | Genesis account funding | `{}` |
-| `forking` | State forking configuration | Disabled |
+| `forking` | State forking configuration | Enabled (see note below) |
+
+> **Note:** The default configuration has `forking.enabled: true` and references a Docker image (`tiljordan/thornode-forking`) that is **no longer available** on Docker Hub. You must explicitly set `forking.enabled: false` and provide a valid participant image (e.g., `registry.gitlab.com/thorchain/thornode:mocknet`) for deployment to succeed.
 
 ### Module Configuration
 
@@ -82,13 +96,13 @@ The package supports extensive Cosmos SDK module configuration including:
 
 ```yaml
 participants:
-  - image: "registry.gitlab.com/thorchain/thornode:mainnet"
+  - image: "registry.gitlab.com/thorchain/thornode:mocknet"
     account_balance: 1000000000000000
     bond_amount: "300000000000000"
     count: 1
     min_cpu: 500
-    min_memory: 1024
-    gomemlimit: 6GiB
+    min_memory: 2048
+    gomemlimit: "1GiB"
 ```
 
 ### CLI Container Configuration
@@ -170,9 +184,10 @@ chains:
 
 ### Available Services
 
-The package supports three auxiliary services that are deployed after the network produces its first block:
+The package supports four auxiliary services that are deployed after the network produces its first block:
 
 - **`faucet`** - HTTP API for token distribution using the last generated validator mnemonic
+- **`midgard`** - THORChain block indexer with TimescaleDB backend, provides `/v2/actions` API for swap status tracking
 - **`bdjuno`** - Complete blockchain indexing stack with PostgreSQL database, Hasura GraphQL API, Big Dipper web explorer, and Nginx reverse proxy
 - **`swap-ui`** - Web interface for token swapping with support for prefunded account integration
 
@@ -184,16 +199,22 @@ After deployment, services are accessible at:
 - **RPC**: `http://<node-ip>:26657` - Tendermint RPC
 - **API**: `http://<node-ip>:1317` - Cosmos REST API  
 - **gRPC**: `<node-ip>:9090` - Cosmos gRPC (local)
-- For mainnet forking, use gRPC endpoint `grpc.thor.pfc.zone:443` (TLS)
+- **eBifrost**: `<node-ip>:50051` - eBifrost attestation gRPC
 - **P2P**: `<node-ip>:26656` - Peer-to-peer networking
 - **Metrics**: `http://<node-ip>:26660` - Prometheus metrics
 
 ### Faucet Service
 - **API**: `http://<faucet-ip>:8090` - Token distribution endpoint (`POST /fund`)
 - **Usage**:
-  - `curl -s -X POST -H "Content-Type: application/json" \`
-  - `  -d '{"address":"<thor1...>","amount":"1000000","denom":"rune"}' \`
-  - `  http://<faucet-ip>:8090/fund`
+  ```bash
+  curl -s -X POST -H "Content-Type: application/json" \
+    -d '{"address":"<tthor1...>","amount":"1000000000","denom":"rune"}' \
+    http://<faucet-ip>:8090/fund
+  ```
+
+### Midgard (Block Indexer)
+- **API**: `http://<midgard-ip>:8080` - Swap status, pool history (`/v2/actions`, `/v2/pools`)
+- **Database**: `<midgard-db-ip>:5432` - TimescaleDB backing store
 
 ### Block Explorer (BdJuno)
 - **Explorer**: `http://<explorer-ip>:80` - Web interface
@@ -280,98 +301,45 @@ chains:
 
 ### Prefunded Accounts
 
-Fund accounts at genesis time by listing THORChain addresses under `prefunded_accounts`. No private keys are required or stored; addresses simply appear in genesis with the requested balance for every denom. If you also deploy CLI containers, you can optionally preload mnemonics via `cli_service.preload_keys` so the CLI keyring has convenient access to those funded accounts while keeping prefunding and key management decoupled. See [README_PREFUNDED_ACCOUNTS.md](README_PREFUNDED_ACCOUNTS.md) for a deeper dive.
+Fund accounts at genesis time by listing THORChain addresses under `prefunded_accounts`. No private keys are required or stored; addresses simply appear in genesis with the requested balance for every denom. If you also deploy CLI containers, you can optionally preload mnemonics via `cli_service.preload_keys` so the CLI keyring has convenient access to those funded accounts while keeping prefunding and key management decoupled. See [examples/prefunded-accounts.yaml](examples/prefunded-accounts.yaml) for a working example.
 
 ### State Forking
+
+> **Currently broken.** State forking requires the `tiljordan/thornode-forking` Docker image which is no longer available on Docker Hub. The forking configs and examples below are preserved for reference but will not work until a replacement image is published.
 
 Fork from mainnet state for realistic testing. Requires a forking-enabled THORNode image that can fetch state from the specified RPC endpoint. The package supports caching and configurable gas costs for state fetching operations.
 
 ## Examples
 
-### Basic Deployment
-Use default configuration with a single validator:
+### Cross-Chain Swap Testing (Recommended)
+Deploy with Bifrost + Bitcoin + Ethereum for real cross-chain swap testing ([examples/bifrost-no-fork.yaml](examples/bifrost-no-fork.yaml)):
 ```bash
-kurtosis run --enclave thorchain-testnet github.com/0xBloctopus/thorchain-package
+kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.yaml
 ```
 
-### Prefunded Accounts
-Fund specific accounts at genesis time ([examples/prefunded-accounts.yaml](examples/prefunded-accounts.yaml)):
-```yaml
-chains:
-  - name: thorchain
-    type: thorchain
-    prefunded_accounts:
-      # Each account receives ALL ~500 mainnet denoms at the specified amount
-      thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs: 1000000000000000  # 1M RUNE + all denoms
-      thor1e0lmk5juawc46jwjwd0xfz587njej7ay5fh6cd: 500000000000000   # 500K RUNE + all denoms
-    deploy_cli: true
-    cli_service:
-      preload_keys:
-        - name: alice
-          mnemonic: "<24-word mnemonic for thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs>"
+Then bootstrap liquidity pools:
+```bash
+./scripts/bootstrap-pools.sh
 ```
-
-### CLI Key Preloading
-Supply mnemonics exclusively to the CLI toolchain so they are ready for transactions without exposing keys to the network launcher:
-```yaml
-chains:
-  - config_type: cli_only
-    name: thorchain-cli
-    rpc_url: "https://thornode.ninerealms.com:443"
-    preload_keys:
-      - name: integration-bot
-        mnemonic: "<24-word mnemonic>"
-```
-The CLI launcher imports each mnemonic, warns if the derived address is *not* listed under `prefunded_accounts`, and automatically uses the first imported key as the CLI default.
-
-### State Forking
-Fork from mainnet state with a minimal config (examples/forking-genesis.yaml):
-```yaml
-chains:
-  - name: thorchain
-    type: thorchain
-    chain_id: "thorchain-1"
-    app_version: "3.11.0"
-    forking:
-      enabled: true
-      image: "tiljordan/thornode-forking:1.0.25-23761879"
-      height: 23015000
-    participants:
-      - image: "tiljordan/thornode-forking:1.0.25-23761879"
-        count: 1
-        account_balance: 1000000000000
-        bond_amount: 500000000000
-    faucet:
-      faucet_amount: 1000000000000000
-      transfer_amount: 10000000000000
-    additional_services:
-      - faucet
-```
-Note: the launcher now reads `initial_height` directly from the generated `genesis.json`, so no manual override is necessary.
 
 ### Custom Services
 Deploy specific auxiliary services:
 ```yaml
 chains:
-  - name: "thorchain-custom"
-    type: "thorchain"
-    additional_services: ["faucet", "bdjuno", "swap-ui"]
+  - name: thorchain
+    type: thorchain
+    forking:
+      enabled: false
+    participants:
+      - image: "registry.gitlab.com/thorchain/thornode:mocknet"
+        count: 1
+    additional_services: ["faucet", "midgard", "bdjuno"]
     faucet:
       transfer_amount: 50000000000000  # Custom faucet amount (500k RUNE)
 ```
 
-### CLI Container with Local Network
-Enable CLI toolchain for CosmWasm development ([examples/cli-with-network.yaml](examples/cli-with-network.yaml)):
-```yaml
-chains:
-  - name: thorchain-dev
-    deploy_cli: true  # Rust toolchain, faucet key, contract build tools
-    additional_services:
-      - faucet
-```
-
 ### Remote Network Connection (CLI-Only)
-Connect to remote networks without running a full node ([examples/cli-only-custom.yaml](examples/cli-only-custom.yaml)):
+Connect to remote networks without running a full node ([examples/cli-only.yaml](examples/cli-only.yaml)):
 ```yaml
 chains:
   # Built-in profile (mainnet or octhornet)
@@ -387,37 +355,68 @@ chains:
     api_url: https://api.example.com
 ```
 
+### CLI Key Preloading
+Supply mnemonics exclusively to the CLI toolchain so they are ready for transactions without exposing keys to the network launcher:
+```yaml
+chains:
+  - config_type: cli_only
+    name: thorchain-cli
+    rpc_url: "https://thornode.ninerealms.com:443"
+    preload_keys:
+      - name: integration-bot
+        mnemonic: "<24-word mnemonic>"
+```
+The CLI launcher imports each mnemonic, warns if the derived address is *not* listed under `prefunded_accounts`, and automatically uses the first imported key as the CLI default.
 
-### Cross-Chain Swap Testing (Bifrost)
-Deploy with Bifrost + Bitcoin + Ethereum for real cross-chain swap testing:
+### Prefunded Accounts
+Fund specific accounts at genesis time ([examples/prefunded-accounts.yaml](examples/prefunded-accounts.yaml)):
+> **Note:** This example uses forking mode, which is currently broken (see State Forking below). The `prefunded_accounts` feature itself works in non-forking mode with RUNE only.
+
 ```yaml
 chains:
   - name: thorchain
     type: thorchain
-    bifrost_enabled: true
+    prefunded_accounts:
+      thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs: 1000000000000000  # 1M RUNE
+      thor1e0lmk5juawc46jwjwd0xfz587njej7ay5fh6cd: 500000000000000   # 500K RUNE
+    deploy_cli: true
+    cli_service:
+      preload_keys:
+        - name: alice
+          mnemonic: "<24-word mnemonic for thor1qpwyke4xyxjaa4rv6r46fflzs2w0vey0yf3kzs>"
+```
+
+### State Forking (Currently Broken)
+> Requires `tiljordan/thornode-forking` Docker image which is no longer available on Docker Hub.
+
+Fork from mainnet state with a minimal config (examples/forking-genesis.yaml):
+```yaml
+chains:
+  - name: thorchain
+    type: thorchain
+    chain_id: "thorchain-1"
+    app_version: "3.11.0"
+    forking:
+      enabled: true
+      image: "tiljordan/thornode-forking:1.0.25-23761879"  # unavailable
+      height: 23015000
+    participants:
+      - image: "tiljordan/thornode-forking:1.0.25-23761879"  # unavailable
+        count: 1
+        account_balance: 1000000000000
+        bond_amount: 500000000000
     additional_services:
       - faucet
 ```
 
 ### Contract Development Workflow
 
-1. **Network Deployment**: Deploy both local (clean state) and forked (mainnet state) networks
-2. **Mimir Configuration**: Make sure to have set `WASMPERMISSIONLESS=1` to enable permissionless deployment
+1. **Network Deployment**: Deploy a local mocknet using `bifrost-no-fork.yaml`
+2. **Mimir Configuration**: `WASMPERMISSIONLESS=1` is set by default in genesis
 3. **Contract Upload**: Use `thornode tx wasm store` to upload contract bytecode
 4. **Contract Instantiation**: Use `thornode tx wasm instantiate` to create contract instances
 
-### THORChain-Specific Considerations
-
-#### Mimir Permission System
-THORChain uses a dual permission system:
-- **Genesis Permissions**: Set to "Everybody" in genesis configuration
-- **Runtime Permissions**: Controlled by `WASMPERMISSIONLESS` mimir value
-
-Forked networks inherit mainnet mimir values where `WASMPERMISSIONLESS=0`, requiring manual configuration.
-
-##### Defaults and overrides
-- By default, this package sets `mimir.values.WASMPERMISSIONLESS: 1` in `src/package_io/thorchain_defaults.json`.
-- You can override in your args YAML:
+You can override the WASM permission mimir in your args YAML:
 
 ```yaml
 chains:
@@ -429,19 +428,11 @@ chains:
         WASMPERMISSIONLESS: 0   # override default 1
 ```
 
-In forking-enabled runs, the configurator first funds the validator via the faucet, then submits the Mimir vote (sync) to avoid insufficient-funds errors.
-
 #### WASM Runtime Limitations
 **Current Limitation**: THORChain's WASM runtime doesn't support bulk memory operations.
 - Contracts compile successfully but fail WASM validation during deployment
 - Error: "bulk memory support is not enabled"
 - This is a known limitation, not a deployment failure
-
-#### Development Recommendations
-1. Use local networks for rapid iteration and permission testing
-2. Use forked networks for realistic state testing
-3. Focus on deployment process validation rather than contract execution
-4. Monitor THORChain updates for bulk memory support
 
 ## Network Architecture
 
@@ -458,10 +449,9 @@ Remove the deployment:
 kurtosis enclave rm thorchain-testnet
 ```
 
-## Support
+## Documentation
 
-For detailed configuration options and troubleshooting:
-- Service configuration templates in `src/` directory
-- [Prefunded accounts documentation](README_PREFUNDED_ACCOUNTS.md)
-- [Kurtosis package configuration](kurtosis.yml) - Contains comprehensive package description, prerequisites, and seed node topology details
-- Individual service launcher implementations for advanced customization
+- [DEPLOYMENT_GUIDE.md](DEPLOYMENT_GUIDE.md) - Step-by-step deployment instructions, accessing services, troubleshooting
+- [DEPLOYMENT_MANUAL.md](DEPLOYMENT_MANUAL.md) - Pool bootstrapping, swap mechanics, ERC-20 tokens, extending with new chains
+- [kurtosis.yml](kurtosis.yml) - Kurtosis package description and configuration schema
+- Service launcher implementations in `src/` directory for advanced customization

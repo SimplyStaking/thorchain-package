@@ -1,6 +1,6 @@
-# THORChain Local Deployment Guide
+# THORChain Local Mocknet Deployment Guide
 
-Step-by-step guide for deploying a local THORChain testnet with cross-chain swap support. Works on macOS, Linux, and any system with Docker.
+Step-by-step guide for deploying a local THORChain mocknet with cross-chain swap support. Works on macOS, Linux, and any system with Docker.
 
 ## Prerequisites
 
@@ -50,15 +50,17 @@ This pulls several Docker images on first run (may take a few minutes).
 
 ### Quick Reference
 
-| Config File | Use Case | Startup Time | Services |
-|---|---|---|---|
-| `examples/bifrost-no-fork.yaml` | Local swap testing | ~2-5 min | THORNode, Faucet, Midgard, Bitcoin, Ethereum, Bifrost |
-| `examples/forking-disabled.yaml` | Simple THORNode only | ~1-2 min | THORNode only |
-| `examples/bifrost-enabled.yaml` | Cross-chain with mainnet state | ~10-20 min | THORNode (forked), Faucet, Bitcoin, Ethereum, Bifrost |
-| `examples/forking-enabled.yaml` | Mainnet fork + CLI + MIMIR | ~10-20 min | THORNode (forked), Faucet, CLI |
-| `examples/forking-genesis.yaml` | Mainnet fork (genesis template) | ~10-20 min | THORNode (forked), Faucet |
-| `examples/prefunded-accounts.yaml` | Pre-funded test accounts | ~10-20 min | THORNode (forked), Faucet |
-| `examples/cli-only.yaml` | CLI for remote networks | ~30 sec | CLI container only |
+| Config File | Use Case | Startup Time | Services | Status |
+|---|---|---|---|---|
+| `examples/bifrost-no-fork.yaml` | Local swap testing (recommended) | ~2-5 min | THORNode, Faucet, Midgard, Bitcoin, Ethereum, Bifrost | Working |
+| `examples/cli-only.yaml` | CLI for remote networks | ~30 sec | CLI container only | Working |
+| `examples/bifrost-enabled.yaml` | Cross-chain with mainnet state | ~10-20 min | THORNode (forked), Faucet, Bitcoin, Ethereum, Bifrost | Broken |
+| `examples/forking-enabled.yaml` | Mainnet fork + CLI + MIMIR | ~10-20 min | THORNode (forked), Faucet, CLI | Broken |
+| `examples/forking-genesis.yaml` | Mainnet fork (genesis template) | ~10-20 min | THORNode (forked), Faucet | Broken |
+| `examples/forking-disabled.yaml` | Simple THORNode only | ~1-2 min | THORNode only | Broken |
+| `examples/prefunded-accounts.yaml` | Pre-funded test accounts | ~10-20 min | THORNode (forked), Faucet | Broken |
+
+> **Note:** Configs marked "Broken" depend on the `tiljordan/thornode-forking` Docker image which is no longer available on Docker Hub. `forking-disabled.yaml` is also affected because it does not explicitly set `forking.enabled: false`, so it falls back to the default forking image. Use `bifrost-no-fork.yaml` for local development.
 
 ---
 
@@ -243,9 +245,10 @@ The aggregator can then:
 
 ## Simple THORNode (No Cross-Chain)
 
-For basic THORChain testing without Bifrost/Bitcoin/Ethereum:
+> **Currently broken.** `forking-disabled.yaml` does not explicitly disable forking, so it defaults to using the missing `tiljordan/thornode-forking` image. Use `bifrost-no-fork.yaml` instead, which works and includes cross-chain support.
 
 ```bash
+# This currently fails — use bifrost-no-fork.yaml instead
 kurtosis run --enclave thorchain-simple . --args-file examples/forking-disabled.yaml
 ```
 
@@ -253,9 +256,10 @@ kurtosis run --enclave thorchain-simple . --args-file examples/forking-disabled.
 
 ## Mainnet Fork with Cross-Chain
 
-For testing against real mainnet state (slower startup, requires internet):
+> **Currently broken.** Requires the `tiljordan/thornode-forking` Docker image which is no longer available on Docker Hub.
 
 ```bash
+# This currently fails — forking image unavailable
 kurtosis run --enclave thorchain-fork . --args-file examples/bifrost-enabled.yaml
 ```
 
@@ -321,8 +325,8 @@ sudo apt update && sudo apt install -y kurtosis-cli
 
 # 3. Start engine and deploy
 kurtosis engine start
-git clone <this-repository>
-cd thorchain-package
+git clone git@github.com:SimplyStaking/thorchain-mocknet.git
+cd thorchain-mocknet
 kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.yaml
 ```
 
@@ -330,7 +334,7 @@ kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.
 
 ```yaml
 # Example GitHub Actions step
-- name: Deploy THORChain testnet
+- name: Deploy THORChain mocknet
   run: |
     kurtosis engine start
     kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.yaml
@@ -340,12 +344,11 @@ kurtosis run --enclave thorchain-testnet . --args-file examples/bifrost-no-fork.
 
 ### Deploy from Remote (Without Cloning)
 
-```bash
-# Deploy directly from GitHub (uses default config)
-kurtosis run --enclave thorchain-testnet github.com/0xBloctopus/thorchain-package
+> **Note:** The default config has `forking.enabled: true` which requires an unavailable Docker image. Always pass an explicit config with `forking.enabled: false` when deploying remotely.
 
-# Deploy from GitHub with a specific config
-kurtosis run --enclave thorchain-testnet github.com/0xBloctopus/thorchain-package \
+```bash
+# Deploy from GitHub with non-forking config (recommended)
+kurtosis run --enclave thorchain-testnet github.com/SimplyStaking/thorchain-mocknet \
   '{"chains":[{"name":"thorchain","type":"thorchain","bifrost_enabled":true,"bitcoin_enabled":true,"ethereum_enabled":true,"forking":{"enabled":false},"participants":[{"image":"registry.gitlab.com/thorchain/thornode:mocknet","count":1,"account_balance":1000000000000000,"bond_amount":300000000000000,"min_memory":2048,"gomemlimit":"1GiB"}],"faucet":{"faucet_amount":1000000000000000,"transfer_amount":10000000000000},"additional_services":["faucet"]}]}'
 ```
 

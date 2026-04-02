@@ -1,8 +1,8 @@
-name: github.com/0xBloctopus/thorchain-package
+name: github.com/SimplyStaking/thorchain-mocknet
 description: |
-  Thorchain
-  =========
-  This Kurtosis package instantiates private Thorchain testnets. It automates genesis file generation, network launching with proper seed node topology, and deployment of auxiliary services like faucets and block explorers.
+  THORChain Mocknet
+  =================
+  This Kurtosis package instantiates private THORChain mocknets. It automates genesis file generation, network launching with proper seed node topology, and deployment of auxiliary services like faucets and block explorers.
 
   Prerequisites
   -------------
