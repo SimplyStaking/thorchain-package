@@ -441,11 +441,16 @@ This means the **first ERC-20 outbound for a new token may take ~300 extra block
 
 ### OP_RETURN Memo Size for BTC Swaps
 
-Bitcoin OP_RETURN payloads default to 80 bytes. ERC-20 asset names like `ETH.USDC-0XA3910454BF2CB59B8B3A401589A3BACC5CA42306` are 52 characters, plus a destination ETH address (42 chars), plus the `SWAP:` prefix — totaling ~96 bytes. The Bitcoin launcher sets `-datacarriersize=120` to accommodate this.
+Bitcoin OP_RETURN payloads default to 80 bytes. ERC-20 asset names like `ETH.USDC-0XA3910454BF2CB59B8B3A401589A3BACC5CA42306` are 52 characters, plus a destination ETH address (42 chars), plus the `=:` prefix — totaling ~96 bytes. This exceeds the 80-byte limit.
 
-You can use memo abbreviations to shorten the payload:
-- `SWAP:` → `=:` or `s:`
-- Pool short codes (if assigned) can replace the full asset name
+The Bitcoin launcher does **not** increase `-datacarriersize` — it uses the default 80-byte limit, matching mainnet Bitcoin Core behavior. Aggregators must abbreviate contract addresses in swap memos to fit. THORChain supports fuzzy matching of abbreviated asset identifiers to the deepest pool:
+
+- `ETH.USDC-0xA3910454BF2CB59B8B3A401589A3BACC5CA42306` → `ETH.USDC` (ticker-only, resolves to deepest USDC pool)
+- `ETH.USDC-2306` (last 4 hex chars, for disambiguation when multiple pools share a ticker)
+- `SWAP:` → `=:` or `s:` (action shorthand)
+- Native assets: `ETH.ETH` → `e`, `BTC.BTC` → `b` (THORChain shorthand codes)
+
+> **Future work**: Expose `-datacarriersize` as a configurable parameter in `bitcoin_launcher.star` (default: leave unset, matching Bitcoin Core's 83-byte / 80-byte-payload default). This would allow developers to opt in to a higher limit for testing without memo abbreviation, while keeping the default aligned with mainnet behavior.
 
 ---
 
@@ -560,7 +565,7 @@ To add support for DOGE, LTC, or BCH:
    - Configure RPC credentials
    - Create a wallet and mine initial blocks
    - Bitcoin-like chains need `-deprecatedrpc=create_bdb` for legacy wallet support (if v26+ based)
-   - Set `-datacarriersize=120` for long OP_RETURN memos
+   - Note: Bitcoin Core defaults to 80-byte OP_RETURN (matching mainnet). Aggregators must abbreviate ERC-20 contract addresses in swap memos. See [§6 OP_RETURN Memo Size](#op_return-memo-size-for-btc-swaps).
 
 2. **Update `bifrost_launcher.star`**:
    - Remove `<CHAIN>_DISABLED=true` (e.g., `DOGE_DISABLED`)
@@ -764,7 +769,7 @@ docker logs <bifrost_container> 2>&1 | grep -i "ERR.*sign\|fail.*sign\|revert"
 
 **Cause**: Bitcoin Core's default `-datacarriersize` is 83 bytes (80 payload). ERC-20 asset names in swap memos can exceed this.
 
-**Fix**: The Bitcoin launcher already sets `-datacarriersize=120`. If you need longer memos, increase this value in `bitcoin_launcher.star`. You can also use memo abbreviations:
+**Fix**: The Bitcoin launcher uses the default 80-byte OP_RETURN limit (matching mainnet). Aggregators must abbreviate ERC-20 contract addresses in swap memos — THORChain resolves abbreviated identifiers via fuzzy matching to the deepest pool. See [§6 OP_RETURN Memo Size](#op_return-memo-size-for-btc-swaps) for abbreviation strategies. You can also use memo action shorthands:
 - `SWAP:` → `=:` or `s:`
 - `ADD:` → `+:` or `a:`
 
