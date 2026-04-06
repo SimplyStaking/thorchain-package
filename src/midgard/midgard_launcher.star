@@ -49,21 +49,26 @@ def launch_midgard(plan, chain_name):
         ),
     )
 
-    # Wait for Postgres to accept connections
+    # Wait for TimescaleDB to be fully ready.
+    # pg_isready is insufficient — it returns success as soon as the socket
+    # accepts connections, before extensions are loaded and the DB is queryable.
+    # Midgard connects immediately on startup and crashes if the DB isn't
+    # ready to handle queries (observed as "Failed to look up 'constants' table"
+    # followed by exit code 1, which Kurtosis then reports as exit 137).
     plan.exec(
         service_name=timescaledb_name,
         recipe=ExecRecipe(
             command=[
                 "/bin/sh", "-c",
                 """set -eu; i=0; while [ $i -lt 30 ]; do
-          if pg_isready -U {user} -d {db} >/dev/null 2>&1; then
-            echo 'TimescaleDB ready'; exit 0;
+          if psql -U {user} -d {db} -tAc "SELECT count(*) FROM pg_extension WHERE extname='timescaledb'" 2>/dev/null | grep -q "1"; then
+            echo 'TimescaleDB ready (extension loaded)'; exit 0;
           fi;
           sleep 1; i=$((i+1));
         done; echo 'TimescaleDB timeout'; exit 1""".format(user=DB_USER, db=DB_NAME),
             ],
         ),
-        description="Wait for TimescaleDB to be ready",
+        description="Wait for TimescaleDB to be ready (extension verified)",
     )
 
     # --- Midgard config ---
@@ -120,6 +125,22 @@ def launch_midgard(plan, chain_name):
         name="{}-midgard-config".format(chain_name),
     )
 
+    # Verify DB accepts queries right before launching Midgard.
+    # This guards against the race where TimescaleDB briefly drops
+    # connections between the readiness check and Midgard's startup.
+    plan.exec(
+        service_name=timescaledb_name,
+        recipe=ExecRecipe(
+            command=[
+                "/bin/sh", "-c",
+                """psql -U {user} -d {db} -c 'SELECT 1' >/dev/null 2>&1 && echo 'DB query OK' || (echo 'DB query failed'; exit 1)""".format(
+                    user=DB_USER, db=DB_NAME,
+                ),
+            ],
+        ),
+        description="Verify DB accepts queries before Midgard launch",
+    )
+
     # --- Midgard service ---
     midgard_name = "{}-midgard".format(chain_name)
     midgard_service = plan.add_service(
@@ -138,18 +159,22 @@ def launch_midgard(plan, chain_name):
         ),
     )
 
-    # Wait for Midgard to start syncing (health endpoint returns 200)
+    # Wait for Midgard to start syncing (health endpoint returns 200).
+    # Timeout increased to 90s (from 60s) and poll interval reduced to 1s
+    # to catch Midgard startup faster. The previous 60s/2s combination was
+    # too tight on slower hosts where the DB connection + initial sync takes
+    # longer.
     plan.exec(
         service_name=midgard_name,
         recipe=ExecRecipe(
             command=[
                 "/bin/sh", "-c",
-                """set -eu; i=0; while [ $i -lt 60 ]; do
+                """set -eu; i=0; while [ $i -lt 90 ]; do
           if wget -qO- http://localhost:8080/v2/health >/dev/null 2>&1; then
             echo 'Midgard API ready'; exit 0;
           fi;
-          sleep 2; i=$((i+1));
-        done; echo 'Midgard health timeout'; exit 1""",
+          sleep 1; i=$((i+1));
+        done; echo 'Midgard health timeout after 90s'; exit 1""",
             ],
         ),
         description="Wait for Midgard API to be ready",
