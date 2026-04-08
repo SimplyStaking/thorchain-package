@@ -53,9 +53,15 @@ err() { printf '\033[1;31m  ✗ %s\033[0m\n' "$*" >&2; }
 
 kexec() {
     local svc="$1"; shift
-    local out
-    out=$(kurtosis service exec "$ENCLAVE" "$svc" "$*" 2>&1 | grep -v "^The command")
-    echo "$out"
+    local container
+    container=$(docker ps --filter "name=${svc}--" --format '{{.ID}}' | head -1)
+    if [ -z "$container" ]; then
+        err "Container for service '$svc' not found"
+        return 1
+    fi
+    # Pipe "y" to stdin for commands that prompt for confirmation (e.g. thornode keys add).
+    # Harmless on macOS Docker Desktop where no prompt appears — the extra input is ignored.
+    echo "y" | docker exec -i "$container" sh -c "$*" 2>&1
 }
 
 # Get a mapped host port for a service
@@ -194,9 +200,29 @@ ok "Funded with 500k RUNE"
 
 log "Deploying USDC ERC-20 token"
 
-# Write a minimal ERC-20 contract
-USDC_SOL=$(mktemp /tmp/USDC.XXXXX.sol)
-cat > "$USDC_SOL" << 'SOLEOF'
+# Pre-compiled USDC contract: uses Anvil RPC to inject bytecode + storage directly.
+# This avoids needing `forge` (which may be unavailable or killed on some hosts).
+# The bytecode is from a minimal ERC-20 with: name="USD Coin", symbol="USDC",
+# decimals=6, totalSupply=1e15 (1B USDC), all minted to deployer (account 0).
+#
+# If `forge` is available, use it for a fresh compile. Otherwise fall back to
+# direct Anvil state injection with pre-computed values.
+
+# Prefer pre-compiled bytecode when available — it's faster and avoids forge/solc
+# issues on servers with security policies that block or hang on compilation.
+# Only fall back to forge if the hex file is missing.
+_precompiled="$(dirname "$0")/../data/usdc-runtime.hex"
+if [ -f "$_precompiled" ] && [ -s "$_precompiled" ]; then
+    _forge_ok=false
+elif command -v forge &>/dev/null && forge --version &>/dev/null; then
+    _forge_ok=true
+else
+    _forge_ok=false
+fi
+if [ "$_forge_ok" = true ]; then
+    # ── Forge available: compile and deploy, then clone to target ──
+    USDC_SOL=$(mktemp /tmp/USDC.XXXXX.sol)
+    cat > "$USDC_SOL" << 'SOLEOF'
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 contract USDC {
@@ -236,41 +262,61 @@ contract USDC {
     }
 }
 SOLEOF
+    TEMP_ADDR=$(forge create "$USDC_SOL:USDC" \
+        --private-key "$DEPLOYER_KEY" \
+        --rpc-url "$ETH_RPC" \
+        --broadcast 2>&1 | grep "Deployed to:" | awk '{print $3}')
+    rm -f "$USDC_SOL"
+    if [ -z "$TEMP_ADDR" ]; then
+        err "Failed to deploy USDC contract via forge"
+        exit 1
+    fi
+    ok "Temp USDC at $TEMP_ADDR"
 
-# Deploy to a temp address
-TEMP_ADDR=$(forge create "$USDC_SOL:USDC" \
-    --private-key "$DEPLOYER_KEY" \
-    --rpc-url "$ETH_RPC" \
-    --broadcast 2>&1 | grep "Deployed to:" | awk '{print $3}')
-rm -f "$USDC_SOL"
+    RUNTIME_CODE=$(cast code "$TEMP_ADDR" --rpc-url "$ETH_RPC")
+    cast rpc anvil_setCode "$USDC_TARGET" "$RUNTIME_CODE" --rpc-url "$ETH_RPC" >/dev/null
+    for SLOT in 0 1 2 3; do
+        VAL=$(cast storage "$TEMP_ADDR" "$SLOT" --rpc-url "$ETH_RPC")
+        cast rpc anvil_setStorageAt "$USDC_TARGET" "$(printf '0x%064x' $SLOT)" "$VAL" --rpc-url "$ETH_RPC" >/dev/null
+    done
+    BALANCE_SLOT=$(cast index address "$DEPLOYER_ADDR" 4)
+    BAL_VAL=$(cast storage "$TEMP_ADDR" "$BALANCE_SLOT" --rpc-url "$ETH_RPC")
+    cast rpc anvil_setStorageAt "$USDC_TARGET" "$BALANCE_SLOT" "$BAL_VAL" --rpc-url "$ETH_RPC" >/dev/null
+else
+    # ── No forge: inject pre-compiled bytecode directly via Anvil RPC ──
+    ok "forge unavailable — using pre-compiled USDC bytecode"
 
-if [ -z "$TEMP_ADDR" ]; then
-    err "Failed to deploy USDC contract"
-    exit 1
+    # Runtime bytecode (compiled from the contract above with solc 0.8.x)
+    RUNTIME_CODE=$(cat "$(dirname "$0")/../data/usdc-runtime.hex" 2>/dev/null || echo "")
+    if [ -z "$RUNTIME_CODE" ]; then
+        err "Pre-compiled USDC bytecode not found at data/usdc-runtime.hex"
+        err "Generate it: forge inspect USDC.sol:USDC deployedBytecode > data/usdc-runtime.hex"
+        exit 1
+    fi
+
+    cast rpc anvil_setCode "$USDC_TARGET" "$RUNTIME_CODE" --rpc-url "$ETH_RPC" >/dev/null
+
+    # Storage layout:
+    #   slot 0: name   = "USD Coin" (short string encoding)
+    #   slot 1: symbol = "USDC"     (short string encoding)
+    #   slot 2: decimals = 6
+    #   slot 3: totalSupply = 1000000000 * 10^6 = 1e15
+    #   slot keccak256(deployer, 4): balanceOf[deployer] = totalSupply
+    cast rpc anvil_setStorageAt "$USDC_TARGET" "0x0000000000000000000000000000000000000000000000000000000000000000" "0x55534420436f696e000000000000000000000000000000000000000000000010" --rpc-url "$ETH_RPC" >/dev/null
+    cast rpc anvil_setStorageAt "$USDC_TARGET" "0x0000000000000000000000000000000000000000000000000000000000000001" "0x5553444300000000000000000000000000000000000000000000000000000008" --rpc-url "$ETH_RPC" >/dev/null
+    cast rpc anvil_setStorageAt "$USDC_TARGET" "0x0000000000000000000000000000000000000000000000000000000000000002" "0x0000000000000000000000000000000000000000000000000000000000000006" --rpc-url "$ETH_RPC" >/dev/null
+    cast rpc anvil_setStorageAt "$USDC_TARGET" "0x0000000000000000000000000000000000000000000000000000000000000003" "0x00000000000000000000000000000000000000000000000000038d7ea4c68000" --rpc-url "$ETH_RPC" >/dev/null
+
+    BALANCE_SLOT=$(cast index address "$DEPLOYER_ADDR" 4)
+    cast rpc anvil_setStorageAt "$USDC_TARGET" "$BALANCE_SLOT" "0x00000000000000000000000000000000000000000000000000038d7ea4c68000" --rpc-url "$ETH_RPC" >/dev/null
 fi
-ok "Temp USDC at $TEMP_ADDR"
-
-# Clone runtime code to whitelisted address
-RUNTIME_CODE=$(cast code "$TEMP_ADDR" --rpc-url "$ETH_RPC")
-cast rpc anvil_setCode "$USDC_TARGET" "$RUNTIME_CODE" --rpc-url "$ETH_RPC" >/dev/null
-
-# Clone storage (slots 0-3 = name, symbol, decimals, totalSupply)
-for SLOT in 0 1 2 3; do
-    VAL=$(cast storage "$TEMP_ADDR" "$SLOT" --rpc-url "$ETH_RPC")
-    cast rpc anvil_setStorageAt "$USDC_TARGET" "$(printf '0x%064x' $SLOT)" "$VAL" --rpc-url "$ETH_RPC" >/dev/null
-done
-
-# Clone deployer balance (mapping slot 4)
-BALANCE_SLOT=$(cast index address "$DEPLOYER_ADDR" 4)
-BAL_VAL=$(cast storage "$TEMP_ADDR" "$BALANCE_SLOT" --rpc-url "$ETH_RPC")
-cast rpc anvil_setStorageAt "$USDC_TARGET" "$BALANCE_SLOT" "$BAL_VAL" --rpc-url "$ETH_RPC" >/dev/null
 
 # Verify
 USDC_SYM=$(cast call "$USDC_TARGET" "symbol()(string)" --rpc-url "$ETH_RPC")
 USDC_DEC=$(cast call "$USDC_TARGET" "decimals()(uint8)" --rpc-url "$ETH_RPC")
 ok "USDC deployed at $USDC_TARGET ($USDC_SYM, $USDC_DEC decimals)"
 
-# ─── Bootstrap BTC.BTC pool ────────────────────────────────────────────────
+# ─── Bootstrap BTC.BTC pool ─────────────────────────────────────────────────
 
 log "Bootstrapping BTC.BTC pool (10 BTC + 100k RUNE)"
 
